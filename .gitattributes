@@ -33,3 +33,7 @@ saved_model/**/* filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.zst filter=lfs diff=lfs merge=lfs -text
 *tfevents* filter=lfs diff=lfs merge=lfs -text
+data/tender/WordLift-Intro-052023.pdf filter=lfs diff=lfs merge=lfs -text
+data/tender/ALL.[[:space:]]A_BANDO[[:space:]]ARTIGIANI[[:space:]](1).pdf filter=lfs diff=lfs merge=lfs -text
+data/tender/*.pdf filter=lfs diff=lfs merge=lfs -text
+data/company/*.pdf filter=lfs diff=lfs merge=lfs -text

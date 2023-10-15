@@ -1,10 +1,10 @@
 ---
-title: AI Content Writer Dev
-emoji: 🐠
-colorFrom: pink
-colorTo: indigo
+title: Ai Content Writer
+emoji: 🏢
+colorFrom: blue
+colorTo: gray
 sdk: gradio
-sdk_version: 3.47.1
+sdk_version: 3.42.0
 app_file: app.py
 pinned: false
 ---

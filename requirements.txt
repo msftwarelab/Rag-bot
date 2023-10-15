@@ -1,0 +1,9 @@
+openai
+llama-index == 0.8.19
+gradio == 3.42.0
+llama-hub == 0.0.29
+pypdf
+docx2txt
+PyMuPDF 
+python-dotenv
+nltk
