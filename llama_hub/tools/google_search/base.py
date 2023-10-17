@@ -3,8 +3,10 @@
 from llama_index.tools.tool_spec.base import BaseToolSpec
 from llama_index.readers.schema.base import Document
 import requests
+import json
 import urllib.parse
 from typing import Optional
+from bs4 import BeautifulSoup
 
 
 QUERY_URL_TMPL = (
@@ -16,7 +18,7 @@ class GoogleSearchToolSpec(BaseToolSpec):
     """Google Search tool spec."""
 
     spec_functions = ["google_search"]
-
+    global result_source
     def __init__(self, key: str, engine: str, num: Optional[int] = None) -> None:
         """Initialize with parameters."""
         self.key = key
@@ -39,11 +41,23 @@ class GoogleSearchToolSpec(BaseToolSpec):
                 engine=self.engine,
                 query=urllib.parse.quote_plus(query)
         )
-
         if self.num is not None:
             if not 1 <= self.num <= 10:
                 raise ValueError("num should be an integer between 1 and 10, inclusive")
             url += f"&num={self.num}"
-
         response = requests.get(url)
+        result_source=json.loads(response.text)['items']
+        for result in result_source:
+            print(result['link'])
         return [Document(text=response.text)]
+    def get_source_url(self, query: str):
+        url = QUERY_URL_TMPL.format(
+                key=self.key,
+                engine=self.engine,
+                query=urllib.parse.quote_plus(query)
+        )
+        response = requests.get(url)
+        result_source=json.loads(response.text)['items']
+        for result in result_source:
+            print(f"---{result['link']}---")
+        return result_source

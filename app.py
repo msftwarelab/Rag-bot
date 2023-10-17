@@ -25,6 +25,7 @@ from base import GoogleSearchToolSpec
 from llama_index.response.schema import StreamingResponse
 from llama_index.query_engine import SubQuestionQueryEngine
 import pandas as pd
+from datetime import datetime
 import fitz
 import time
 import json
@@ -132,7 +133,7 @@ def set_description(name, tool_description : str):
 response_sources = ""
 # Set model
 model = gr.State('')
-model = "gpt-3.5-turbo"
+model = "gpt-4"
 openai.api_key = os.getenv("openai_key")
 service_context = gr.State('')
 indices = {}
@@ -141,8 +142,9 @@ status = ""
 source_infor_results=[]
 google_api_key = os.getenv('google_search_key')
 google_engine_id=os.getenv('google_engine_id')
-
-       
+file_tender_inform_datas=[]
+file_company_inform_datas=[]
+google_source_urls=[['No data','No data','No data','No data','No data','No data','No data','No data','No data','No data','No data']]       
 def set_chatting_mode(value):
     global chatting_mode_status
     chatting_mode_status=value
@@ -152,22 +154,39 @@ set_chatting_mode(1)
 #pdf viewer
 def pdf_view_url():
     # Use an HTML iframe element to embed the PDF viewer.
-    pdf_viewer_html = f'<iframe src="file/assets/pdf_viewer.html" width="100%" height="550px"></iframe>'
+    pdf_viewer_html = f'<iframe src="file/assets/pdf_viewer.html" width="100%" height="470px"></iframe>'
     return pdf_viewer_html
 
-def get_files_inform(directory_path):
+def get_tender_files_inform(directory_path):
+    global file_tender_inform_datas
     if not os.path.exists(directory_path):
         os.makedirs(directory_path)
     files=os.listdir(directory_path)
     file_inform_data=[]
-    file_inform_datas=[]
+    file_tender_inform_datas=[]
     for file_number,file_name in enumerate(files,start=1):
-        file_inform_data=[file_name]
-        file_inform_datas.append(file_inform_data)
-    if file_inform_datas:
-        return file_inform_datas
+        file_inform_data=[file_name,"Delete"]
+        file_tender_inform_datas.append(file_inform_data)
+    if file_tender_inform_datas:
+        return file_tender_inform_datas
     else:
-        return [['No File']]
+        return [['No File',' ']]
+    
+def get_company_files_inform(directory_path):
+    global file_company_inform_datas
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+    files=os.listdir(directory_path)
+    file_inform_data=[]
+    file_company_inform_datas=[]
+    for file_number,file_name in enumerate(files,start=1):
+        file_inform_data=[file_name,"Delete"]
+        file_company_inform_datas.append(file_inform_data)
+    if file_company_inform_datas:
+        return file_company_inform_datas
+    else:
+        return [['No File',' ']]
+    
 #________________________________________________________
 # Modified load_index function to handle multiple indices
 def load_index(directory_path, index_key):
@@ -357,7 +376,7 @@ async def bot(message,history):
             else:
                 history_message=[]
                 response_sources = "No sources found."
-                qa_message=f"({message}).If parentheses content is saying hello,you have to say 'Hello! How can I assist you today?' but if not, you have to say 'Sorry,I don' t know it'. "
+                qa_message=f"({message}).If parentheses content is saying hello,you have to say 'Hello! How can I assist you today?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'. "
                 history_message.append({"role": "user", "content": qa_message})
                 content = openai_agent(history_message)
                 
@@ -418,8 +437,19 @@ async def bot(message,history):
             if history_message:
                 agent.memory.set(history_message)
             response = agent.stream_chat(message)
+            source_urls=google_spec.get_source_url(message)
             stream_token=""
-            if response.sources:
+            print(response.source_nodes)
+            
+            if response.source_nodes==[]:
+                temp_arry=[]
+                temp_arry.append(message)
+                
+                for source_url in source_urls:
+                    temp_arry.append(source_url['link'])
+                google_source_urls.append(temp_arry)
+                # print(f"@@@{google_source_urls}@@@")
+            elif response.source_nodes:
                 response_sources = response.source_nodes
             else:
                 response_sources = "No sources found."
@@ -559,7 +589,27 @@ def delete_index(index_key):
         return debug_info
     else:
         return None
+    
+def delete_row(index_key,file_name):
+    current_datetime = datetime.now().timestamp()
+    print(current_datetime)
+    if openai.api_key:
+        gr.Info("Deleting index..")
+        backup_path = f"./backup_path/{index_key}/{current_datetime}"
+        documents_path = f"./data/{index_key}/{file_name}"
 
+        if not os.path.exists(documents_path):
+            os.makedirs(documents_path)
+        if not os.path.exists(backup_path):
+            os.makedirs(backup_path)
+        shutil.move(documents_path, backup_path)
+        # shutil.rmtree(documents_path)
+        status = ""
+        gr.Info("Index is deleted")
+        debug_info = status
+        return debug_info
+    else:
+        return None
 # Set model
 def set_model(_model):
     global model
@@ -592,26 +642,35 @@ def openai_agent(prompt):
 
 def update_company_info(upload_file):
     
-    file_value=get_files_inform(directory_path = f"data/company")
+    file_value=get_company_files_inform(directory_path = f"data/company")
     return gr.update(value=file_value)
 
 def update_tender_info(upload_file):
     
-    file_value=get_files_inform(directory_path = f"data/tender")
+    file_value=get_tender_files_inform(directory_path = f"data/tender")
     return gr.update(value=file_value)
 
 def set_tender_pdf(evt: gr.SelectData):
-    # pdf_viewer_content = f'<iframe src="file/data/tender/{evt.value}" width="100%" height="600px"></iframe>'
-    file_path=search_files_by_name("./data",evt.value)
-    file_url=f"https://wordlift-ai-content-writer.hf.space/file{file_path}"
-    webbrowser.open(file_url.replace("./", "/"))
-    # return gr.update(value=pdf_viewer_content)
+    select_data=evt.index
+    if select_data[1]==0:
+        pdf_viewer_content = f'<iframe src="file/data/tender/{evt.value}" width="100%" height="600px"></iframe>'
+        file_path=search_files_by_name("./data",evt.value)
+        webbrowser.open(file_path)
+        print(f"---{file_tender_inform_datas}---")
+        return gr.update(value=pdf_viewer_content)
+    else:
+        delete_row("tender",file_tender_inform_datas[int(select_data[0])][0])
+
 def set_company_pdf(evt: gr.SelectData):
-    # pdf_viewer_content = f'<iframe src="file/data/company/{evt.value}" width="100%" height="600px"></iframe>'
-    file_path=search_files_by_name("./data",evt.value)
-    file_url=f"https://wordlift-ai-content-writer.hf.space/file{file_path}"
-    webbrowser.open(file_url.replace("./", "/"))
-    # return gr.update(value=pdf_viewer_content)
+    select_data=evt.index
+    if select_data[1]==0:
+        pdf_viewer_content = f'<iframe src="file/data/company/{evt.value}" width="100%" height="600px"></iframe>'
+        file_path=search_files_by_name("./data",evt.value)
+        webbrowser.open(file_path)
+        return gr.update(value=pdf_viewer_content)
+    else:
+        delete_row("company",file_company_inform_datas[int(select_data[0])][0])
+        
 def set_source_pdf(evt: gr.SelectData):
     pdf_viewer_content = f'<iframe src="file/data/company/{evt.value}" width="100%" height="800px"></iframe>'
     return gr.update(value=pdf_viewer_content)
@@ -621,10 +680,7 @@ def set_highlight_pdf(evt: gr.SelectData):
     file_name=source_infor_results[int(select_data[0])][0]
     source_text=source_infor_results[int(select_data[0])][2]
     file_path=search_files_by_name("./data",file_name)
-    file_url=f"https://wordlift-ai-content-writer.hf.space/file{file_path}"
-    webbrowser.open(file_url.replace("./", "/"))
-    # print(source_infor_results)
-    # pdf_viewer_content = f'<iframe src="file/{file_path}" width="100%" height="600px"></iframe>'
+    webbrowser.open(file_path)
     pdf_viewer_content = f'<h4>{source_text}</h4>'
     return gr.update(value=pdf_viewer_content)
 
@@ -669,7 +725,7 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                                 textbox=msg,
                                 retry_btn=None,
                                 undo_btn=None,
-                                clear_btn=clear,
+                                clear_btn=None,
                                 submit_btn=None
                             )
             chat_interface
@@ -686,7 +742,18 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                                         elem_id="source_dataframe"
                                         )
             pdf_viewer_html=gr.HTML(value=pdf_view_url,label="preview",elem_id="pdf_reference")
+            clear = gr.Button("🧹 Start fresh")
     with gr.Accordion("⚙️ Settings", open=False):
+        with gr.Tab("history"):
+            google_search_dataframe=gr.Dataframe(
+                value=google_source_urls,
+                headers=["Question","Source URL-1","Source URL-2","Source URL-3","Source URL-4","Source URL-5","Source URL-6","Source URL-7","Source URL-8","Source URL-9","Source URL-10"],
+                datatype=["str","str","str","str","str","str","str","str","str","str","str"],
+                col_count=(11,"fixed"),
+                label="Google search source url",
+                interactive=False
+            )
+        
         openai_api_key_textbox = gr.Textbox(
             placeholder="Paste your OpenAI API key (sk-...)",
             show_label=False,
@@ -729,25 +796,27 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
         company_description_textbox.change(lambda x: set_description("company_description",x), inputs=company_description_textbox)
         
         radio = gr.Radio(
-            value="gpt-3.5-turbo", choices=["gpt-3.5-turbo", "gpt-4"], label="Models"
+            value="gpt-4", choices=["gpt-3.5-turbo", "gpt-4"], label="Models"
         )
         
         radio.change(set_model, inputs=radio)
         
         with gr.Row():
-            tender_data=get_files_inform(directory_path = f"data/tender")
-            company_data=get_files_inform(directory_path = f"data/company")
+            tender_data=get_tender_files_inform(directory_path = f"data/tender")
+            company_data=get_company_files_inform(directory_path = f"data/company")
+            
             tender_dataframe=gr.Dataframe(value=tender_data,
-                                        headers=["Tender File Name"],
-                                        datatype=["str"],
-                                        col_count=(1,"fixed"),
+                                        headers=["Tender File Name","Action"],
+                                        datatype=["str","str"],
+                                        col_count=(2,"fixed"),
                                         label="Tender File list",
                                         interactive=False
                                         )
+            
             company_dataframe=gr.Dataframe(value=company_data,
-                                        headers=["Company File Name"],
-                                        datatype=["str"],
-                                        col_count=(1,"fixed"),
+                                        headers=["Company File Name","Action"],
+                                        datatype=["str","str"],
+                                        col_count=(2,"fixed"),
                                         label="Company File list",
                                         interactive=False
                                         )
@@ -770,8 +839,13 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                 delete_button2 = gr.Button(
                     value="❌ Delete Company Index"
                 )
+        with gr.Tab("🔍 Add your own google search url"):
+            with gr.TabItem("google search url"):
+                upload_button3 = gr.UploadButton(
+                    file_types=[".txt"], file_count="multiple"
+                )
     
-    with gr.Accordion("🔍 Context", open=False):
+    with gr.Accordion("🔍 Context", open=False, visible=False):
         sources =  gr.Textbox(
             placeholder="Sources will be shown here",
             lines=5,
@@ -789,7 +863,8 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
         lambda:gr.update(value=get_chat_history()),None, outputs=[chatbot]).then(
         lambda:gr.update(value=update_source()),None,outputs=source_dataframe).then(
             update_source_info, inputs=[chatbot], outputs=sources
-        )
+        ).then(
+        lambda:gr.update(value=google_source_urls),None,outputs=google_search_dataframe)
 
     file_response1 = upload_button1.upload(
         lambda files: upload_file(files,"tender"), upload_button1
@@ -820,8 +895,12 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
         clear_chat_history,None,outputs=[chatbot]).then(
         lambda:gr.update(value=update_source()),None,outputs=source_dataframe)
     
-    tender_dataframe.select(set_tender_pdf,None,pdf_viewer_html)
-    company_dataframe.select(set_company_pdf,None,pdf_viewer_html)
+    tender_dataframe.select(set_tender_pdf,None,pdf_viewer_html).then(
+        update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe
+    )
+    company_dataframe.select(set_company_pdf,None,pdf_viewer_html).then(
+        update_company_info, inputs=[company_dataframe], outputs=company_dataframe
+    )
     source_dataframe.select(set_highlight_pdf,None,pdf_viewer_html)
 
 demo.queue().launch(inline=True).then(lambda:gr.update(value=get_chat_history()),None, outputs=[chatbot])

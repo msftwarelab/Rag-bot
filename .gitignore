@@ -7,5 +7,7 @@ storage/
 app - Copy.py
 data/
 temp/
-chat_history.db
+*.db
 backup_path/
+app_1.py
+*.env
