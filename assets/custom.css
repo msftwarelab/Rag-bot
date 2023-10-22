@@ -172,3 +172,15 @@ table.svelte-1anhtf6.svelte-1anhtf6.svelte-1anhtf6{
     height: 470px;
     overflow: auto;
 }
+
+/* #component-16{
+    display: none;
+} */
+
+#component-11{
+    padding: 0;
+}
+
+.controls-wrap .svelte-1anhtf6{
+    display: none;
+}

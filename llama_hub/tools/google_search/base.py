@@ -46,9 +46,6 @@ class GoogleSearchToolSpec(BaseToolSpec):
                 raise ValueError("num should be an integer between 1 and 10, inclusive")
             url += f"&num={self.num}"
         response = requests.get(url)
-        result_source=json.loads(response.text)['items']
-        for result in result_source:
-            print(result['link'])
         return [Document(text=response.text)]
     def get_source_url(self, query: str):
         url = QUERY_URL_TMPL.format(
@@ -58,6 +55,4 @@ class GoogleSearchToolSpec(BaseToolSpec):
         )
         response = requests.get(url)
         result_source=json.loads(response.text)['items']
-        for result in result_source:
-            print(f"---{result['link']}---")
         return result_source
