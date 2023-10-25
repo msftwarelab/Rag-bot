@@ -122,7 +122,7 @@ wordlift_theme = gr.themes.Soft(
 )
 
 template = '''Abbiamo fornito le informazioni di contesto di seguito:{context_str}
-Prendendo in considerazione queste informazioni, in qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire risposte e fonti alle seguenti domande: {query_str}'''
+Prendendo in considerazione queste informazioni, in qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire risposte e fonti alle seguenti domande.Devi sempre rispondere in italiano: {query_str}'''
 
 custom_prompt = Prompt(template)
 # Set the custom prompt
@@ -164,7 +164,7 @@ def set_chatting_mode(value):
     global chatting_mode_status
     chatting_mode_status=value
 
-set_chatting_mode(1)
+set_chatting_mode("Only Document")
 
 def getSessionList():
     global current_session_id
@@ -291,7 +291,6 @@ def load_or_update_index(directory, index_key):
 
 # Modified upload_file function to handle index_key
 def upload_file(files, index_key):
-    print(f"---file---{files}----index_key----{index_key}----")
     global index_needs_update
     gr.Info("Indexing(uploading...)Please check the Debug output")
     directory_path = f"data/{index_key}"
@@ -322,7 +321,6 @@ def get_chat_history():
         ORDER BY id
     """,(current_session_id,))
     rows = cursor.fetchall()
-    print(current_session_id)
     # print(f'---chat_history-----{rows}')
     # Initialize chat history as an empty list
     chat_history = []
@@ -370,6 +368,7 @@ async def bot(message,history):
     try:
         global response_sources
         global indices
+        global google_source_urls
         if openai.api_key == "":
             gr.Warning("Invalid OpenAI API key.")
             raise ValueError("Invalid OpenAI API key.")
@@ -388,7 +387,7 @@ async def bot(message,history):
                 yield "Please enter a valid OpenAI API key or set the env key."
             yield "Index not found. Please upload the files first."
         
-        if chatting_mode_status==1:
+        if chatting_mode_status=="Only Document":
             if tender is None and company is None:
                 gr.Warning("Index not found. Please upload the files first.")
                 yield "Index not found. Please upload the files first."
@@ -443,7 +442,7 @@ async def bot(message,history):
             else:
                 history_message=[]
                 response_sources = "No sources found."
-                qa_message=f"({message}).If parentheses content is saying hello,you have to say 'Hello! How can I assist you today?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'. "
+                qa_message=f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
                 history_message.append({"role": "user", "content": qa_message})
                 content = openai_agent(history_message)
                 
@@ -460,7 +459,7 @@ async def bot(message,history):
                 
             
         
-        elif chatting_mode_status==3:
+        elif chatting_mode_status=="Documents and Search":
             if tender is None and company is None:
                 gr.Warning("Index not found. Please upload the files first.")
                 yield "Index not found. Please upload the files first."
@@ -502,20 +501,23 @@ async def bot(message,history):
             ).to_tool_list()    
             agent = OpenAIAgent.from_tools([*tools,*google_tools], verbose=True, prompt=custom_prompt)
             if history_message:
+                # qa_message=f"Devi rispondere in italiano."
+                # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
-            response = agent.stream_chat(message)
-            source_urls=google_spec.get_source_url(message)
+            qa_message=f"{message}.Devi rispondere in italiano."
+            response = agent.stream_chat(qa_message)
+            source_urls=google_spec.get_source_url(qa_message)
             stream_token=""
-            print(response.source_nodes)
-            
             if response.source_nodes==[]:
                 temp_arry=[]
                 temp_arry.append(message)
-                
                 for source_url in source_urls:
                     temp_arry.append(source_url['link'])
+                
+                google_source_urls=[]
                 google_source_urls.append(temp_arry)
-                # print(f"@@@{google_source_urls}@@@")
+                print(google_source_urls)
+
             elif response.source_nodes:
                 response_sources = response.source_nodes
             else:
@@ -534,6 +536,8 @@ async def bot(message,history):
                 history_message.append({"role": "assistant", "content":history_data[1]})
                 
             history_message.append({"role": "user", "content": message})
+            qa_message=f"Devi rispondere in italiano."
+            history_message.append({"role": "user", "content": qa_message})
             content = openai_agent(history_message)
 
             partial_message=""
@@ -660,7 +664,6 @@ def delete_index(index_key):
     
 def delete_row(index_key,file_name):
     current_datetime = datetime.now().timestamp()
-    print(current_datetime)
     if openai.api_key:
         gr.Info("Deleting index..")
         backup_path = f"./backup_path/{index_key}/{current_datetime}"
@@ -727,7 +730,6 @@ def set_tender_pdf(evt: gr.SelectData):
         pdf_viewer_content = f'<iframe src="file/data/tender/{evt.value}" width="100%" height="600px"></iframe>'
         file_path=search_files_by_name("./data",evt.value)
         webbrowser.open(file_path)
-        print(f"---{file_tender_inform_datas}---")
         return gr.update(value=pdf_viewer_content)
     else:
         delete_row("tender",file_tender_inform_datas[int(select_data[0])][0])
@@ -782,7 +784,6 @@ def update_session(update_data):
             cursor.execute("UPDATE session_history SET session_title = ? WHERE id = ?;", (nested_list1[0],session_list[i]))
             conn.commit()
             conn.close()
-            print(f"--{i}---{nested_list1}-----{nested_list2}---")
     
 def add_session(session_title):
     if session_title:
@@ -886,12 +887,15 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                     type="password",
                 )
                 openai_api_key_textbox.change(set_openai_api_key, inputs=openai_api_key_textbox)
-                chatting_mode_slide=gr.Slider(1,3,
-                                            step=1,
-                                            label="Chatting Quality > Agent Type",
-                                            container=True ,
-                                            info="Only Document > No Documents > Documents and Search",
-                                            interactive=True)
+                # chatting_mode_slide=gr.Slider(1,3,
+                #                             step=1,
+                #                             label="Chatting Quality > Agent Type",
+                #                             container=True ,
+                #                             info="Only Document > No Documents > Documents and Search",
+                #                             interactive=True)
+                chatting_mode_radio = gr.Radio(
+                    value="Only Document", choices=["Only Document", "No Documents", "Documents and Search"], label="Chatting Quality > Agent Type"
+                )
                 # gr.HTML(value=f"<div style='display:inline'><span style='position: absolute;left: 0px;'>Low</span><span style='position: absolute;right: 0px;'>High</span></div>")
                 custom_prompt = gr.Textbox(
                     placeholder="Here goes the custom prompt",
@@ -1015,7 +1019,9 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
     delete_button2.click(lambda: delete_index("company")).then(
         update_company_info, inputs=[company_dataframe], outputs=company_dataframe
     )
-    chatting_mode_slide.change(set_chatting_mode,inputs=[chatting_mode_slide])
+    
+    chatting_mode_radio.change(set_chatting_mode,inputs=[chatting_mode_radio])
+    
     clear.click(lambda: [], None, chatbot, queue=False).then(
         clear_chat_history,None,outputs=[chatbot]).then(
         lambda:gr.update(value=update_source()),None,outputs=source_dataframe).then(
