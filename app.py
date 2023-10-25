@@ -159,6 +159,7 @@ file_tender_inform_datas=[]
 file_company_inform_datas=[]
 current_session_id=''
 session_list=[]
+google_upload_url=''
 google_source_urls=[['No data','No data','No data','No data','No data','No data','No data','No data','No data','No data','No data']]       
 def set_chatting_mode(value):
     global chatting_mode_status
@@ -292,6 +293,8 @@ def load_or_update_index(directory, index_key):
 # Modified upload_file function to handle index_key
 def upload_file(files, index_key):
     global index_needs_update
+    global google_source_urls
+    global google_upload_url
     gr.Info("Indexing(uploading...)Please check the Debug output")
     directory_path = f"data/{index_key}"
     # Check if the directory exists, if not, create it
@@ -303,10 +306,35 @@ def upload_file(files, index_key):
         # Move the file from its temporary location to the directory_path
         shutil.move(file.name, destination_path)
     # Set index_needs_update for the specified index_key to True
-    index_needs_update[index_key] = True
-    # Load or update the index
-    load_or_update_index(directory_path, index_key)
-    gr.Info("Documents are indexed")
+    if index_key=="url":
+        file_list = os.listdir(directory_path)
+        for file_name in file_list:
+            file_path = os.path.join(directory_path, file_name)
+            # Check if the item in the directory is a file (not a subdirectory)
+            if os.path.isfile(file_path):
+                with open(file_path, 'r') as file:
+                    file_content = file.read()
+                    # value = file_content.strip().split(',')
+
+        # If splitting by comma resulted in only one value, split by white space
+                    # if len(value) == 1:
+                    # temp_arr=[]
+                    google_source_urls=[]
+                    value = file_content.strip().split('\n')
+                    value = value[:10]
+                    for val in value:
+                        google_upload_url+=f"siteSearch={val}&"
+                    if len(value) < 10:
+                        value.extend(['No data'] * (10 - len(value)))
+                    # temp_arr.append(['question']+value)
+                    google_source_urls.append(['question']+value)
+                    # Do something with the file content, e.g., print it
+                    print(f'File: {file_name}\nContent:\n{google_source_urls}\n')
+        # Load or update the index
+    else:
+        index_needs_update[index_key] = True
+        load_or_update_index(directory_path, index_key)
+        gr.Info("Documents are indexed")
     return "Files uploaded successfully!!!"
 # _________________________________________________________________#
 chat_history = []
@@ -369,6 +397,7 @@ async def bot(message,history):
         global response_sources
         global indices
         global google_source_urls
+        global google_upload_url
         if openai.api_key == "":
             gr.Warning("Invalid OpenAI API key.")
             raise ValueError("Invalid OpenAI API key.")
@@ -495,7 +524,7 @@ async def bot(message,history):
                         name='company_index',
                         description=f'{company_description}'
                     ))]
-            google_spec = GoogleSearchToolSpec(key=google_api_key, engine=google_engine_id)
+            google_spec = GoogleSearchToolSpec(key=google_api_key, engine=google_engine_id, siteSearch=google_upload_url)
             google_tools = LoadAndSearchToolSpec.from_defaults(
             google_spec.to_tool_list()[0]
             ).to_tool_list()    
@@ -1005,7 +1034,10 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
     ).then(
         update_company_info, inputs=[company_dataframe], outputs=company_dataframe
     )
-    
+    file_response3 = upload_button3.upload(
+        lambda files: upload_file(files,"url"), upload_button3
+    ).then(
+        lambda:gr.update(value=google_source_urls),None,outputs=google_search_dataframe)
     file_response1.then(
         update_debug_info, inputs=[upload_button1], outputs=debug_output
     )
