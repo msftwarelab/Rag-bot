@@ -159,6 +159,9 @@ file_tender_inform_datas=[]
 file_company_inform_datas=[]
 current_session_id=''
 session_list=[]
+doc_ids = {"company": [], "tender": []}
+company_doc_ids=[]
+tender_doc_ids=[]
 google_upload_url=''
 google_source_urls=[['No data','No data','No data','No data','No data','No data','No data','No data','No data','No data','No data']]       
 def set_chatting_mode(value):
@@ -247,7 +250,11 @@ def get_company_files_inform(directory_path):
 # Modified load_index function to handle multiple indices
 def load_index(directory_path, index_key):
     global status
+    global doc_ids
     documents = SimpleDirectoryReader(directory_path, filename_as_id=True).load_data()
+    doc_ids[index_key]=[x.doc_id for x in documents]
+    print(doc_ids[index_key])
+    # print(documents.id_)
     status += f"loaded documents with {len(documents)} pages.\n"
     if index_key in indices:
         # If index already exists, just update it
@@ -271,7 +278,7 @@ def load_index(directory_path, index_key):
             logging.info(f"New index for {index_key} created and persisted to storage.")
         # Save the loaded/created index in indices dict
         indices[index_key] = index
-    refreshed_docs = index.refresh_ref_docs(
+    index.refresh_ref_docs(
         documents, update_kwargs={"delete_kwargs": {"delete_from_docstore": True}}
     )
     index.storage_context.persist(f"./storage/{index_key}")
@@ -692,6 +699,7 @@ def delete_index(index_key):
         return None
     
 def delete_row(index_key,file_name):
+    global doc_ids
     current_datetime = datetime.now().timestamp()
     if openai.api_key:
         gr.Info("Deleting index..")
@@ -707,8 +715,19 @@ def delete_row(index_key,file_name):
             os.makedirs(index_path)
         shutil.move(documents_path, backup_path)
         shutil.rmtree(index_path)
+        
+        string_to_match = f'data\\{index_key}\\{file_name}'
+        filtered_list = [item for item in doc_ids[index_key] if item.startswith(string_to_match)]
+        for item in filtered_list:
+            print(f"---{item}---")
+            indices[index_key].delete_ref_doc(item,delete_from_docstore=True)
         # shutil.rmtree(documents_path)
-        load_or_update_index(directory_path, index_key)
+        # index_needs_update[index_key] = True
+        # indices[index_key].refresh_ref_docs()
+        id=indices[index_key].index_id
+        # print(os.path.abspath(documents_path))
+         # print(indices[index_key].docstore.doc_ids)
+        # load_or_update_index(directory_path, index_key)
         status = ""
         gr.Info("Index is deleted")
         debug_info = status
