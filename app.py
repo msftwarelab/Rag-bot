@@ -253,7 +253,6 @@ def load_index(directory_path, index_key):
     global doc_ids
     documents = SimpleDirectoryReader(directory_path, filename_as_id=True).load_data()
     doc_ids[index_key]=[x.doc_id for x in documents]
-    print(doc_ids[index_key])
     # print(documents.id_)
     status += f"loaded documents with {len(documents)} pages.\n"
     if index_key in indices:
@@ -336,7 +335,6 @@ def upload_file(files, index_key):
                     # temp_arr.append(['question']+value)
                     google_source_urls.append(['question']+value)
                     # Do something with the file content, e.g., print it
-                    print(f'File: {file_name}\nContent:\n{google_source_urls}\n')
         # Load or update the index
     else:
         index_needs_update[index_key] = True
@@ -379,7 +377,10 @@ def write_chat_history_to_db(value,source_inform):
 def clear_chat_history():
     global current_session_id
     global chat_history
+    global google_source_urls
     chat_history = []
+    google_source_urls=[['No data','No data','No data','No data','No data','No data','No data','No data','No data','No data','No data']]       
+    
     # Clear the chat history from the database as well
     conn = sqlite3.connect("chat_history.db")
     cursor = conn.cursor()
@@ -489,12 +490,7 @@ async def bot(message,history):
                         yield partial_message
                 if partial_message and message:
                     write_chat_history_to_db(f"{message}::::{partial_message}","no_data")
-                #  for token in agent.aquery(message):
-                #     stream_token += token
-                #     yield stream_token
-                
-            
-        
+   
         elif chatting_mode_status=="Documents and Search":
             if tender is None and company is None:
                 gr.Warning("Index not found. Please upload the files first.")
@@ -549,10 +545,11 @@ async def bot(message,history):
                 temp_arry.append(message)
                 for source_url in source_urls:
                     temp_arry.append(source_url['link'])
-                
-                google_source_urls=[]
-                google_source_urls.append(temp_arry)
-                print(google_source_urls)
+                if google_source_urls[0][0]=='No data':
+                    google_source_urls=[]
+                else:
+                    google_source_urls.append(temp_arry)
+                # print(google_source_urls)
 
             elif response.source_nodes:
                 response_sources = response.source_nodes
@@ -691,6 +688,11 @@ def delete_index(index_key):
             shutil.move(source_file, destination_file)
         shutil.rmtree(directory_path)
         shutil.rmtree(documents_path)
+        
+        for item in doc_ids[index_key]:
+            # print(f"---{item}---")
+            indices[index_key].delete_ref_doc(item,delete_from_docstore=True)
+        
         status = ""
         gr.Info("Index is deleted")
         debug_info = status
@@ -719,7 +721,7 @@ def delete_row(index_key,file_name):
         string_to_match = f'data\\{index_key}\\{file_name}'
         filtered_list = [item for item in doc_ids[index_key] if item.startswith(string_to_match)]
         for item in filtered_list:
-            print(f"---{item}---")
+            # print(f"---{item}---")
             indices[index_key].delete_ref_doc(item,delete_from_docstore=True)
         # shutil.rmtree(documents_path)
         # index_needs_update[index_key] = True
@@ -1076,7 +1078,8 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
     clear.click(lambda: [], None, chatbot, queue=False).then(
         clear_chat_history,None,outputs=[chatbot]).then(
         lambda:gr.update(value=update_source()),None,outputs=source_dataframe).then(
-        lambda:gr.update(value=getSessionList()),None,outputs=session_list_dataframe)
+        lambda:gr.update(value=getSessionList()),None,outputs=session_list_dataframe).then(
+        lambda:gr.update(value=google_source_urls),None,outputs=google_search_dataframe)
     
     tender_dataframe.select(set_tender_pdf,None,pdf_viewer_html).then(
         update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe
