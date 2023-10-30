@@ -547,6 +547,7 @@ async def bot(message,history):
                     temp_arry.append(source_url['link'])
                 if google_source_urls[0][0]=='No data':
                     google_source_urls=[]
+                    google_source_urls.append(temp_arry)
                 else:
                     google_source_urls.append(temp_arry)
                 # print(google_source_urls)
