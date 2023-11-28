@@ -40,14 +40,6 @@ ul:not(.options) {
     color: #000000 !important;
 }
 
-[data-testid="bot"] {
-    background-color: #FFFFFF !important;
-}
-
-[data-testid="user"] {
-    background-color: #a3d6ff !important;
-}
-
 input[type=number].svelte-1cl284s{
     display: none;
 }
@@ -56,14 +48,6 @@ input[type=number].svelte-1cl284s{
 .dark #chuanhu_chatbot {
     background-color: var(--chatbot-color-dark) !important;
     color: #FFFFFF !important;
-}
-
-.dark [data-testid="bot"] {
-    background-color: #2C2C2C !important;
-}
-
-.dark [data-testid="user"] {
-    background-color: #a3d6ff !important;
 }
 
 #chuanhu_chatbot {
