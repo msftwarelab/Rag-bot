@@ -1,8 +1,5 @@
 import webbrowser
 from dotenv import load_dotenv
-import json
-import time
-import fitz
 from datetime import datetime
 import pandas as pd
 from llama_index.query_engine import SubQuestionQueryEngine
@@ -429,7 +426,7 @@ def clear_chat_history():
     return gr.update(value=get_chat_history())
 
 
-async def bot(message, history):
+async def bot(history, messages_history):
     # Get the chat history from the database
     # Define custom prompt
     if current_session_id == '':
@@ -460,7 +457,8 @@ async def bot(message, history):
                     "Please enter a valid OpenAI API key or set the env key.")
                 yield "Please enter a valid OpenAI API key or set the env key."
             yield "Index not found. Please upload the files first."
-
+        tools = []
+        message = history[-1][0]
         if chatting_mode_status == "Only Document":
             if tender is None and company is None:
                 gr.Warning("Index not found. Please upload the files first.")
@@ -515,7 +513,7 @@ async def bot(message, history):
                 stream_token = ""
                 for token in response.response_gen:
                     stream_token += token
-                    yield stream_token
+                    yield history, messages_history
                 if stream_token and message:
                     write_chat_history_to_db(
                         f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
@@ -531,7 +529,7 @@ async def bot(message, history):
                     if chunk.choices[0].delta.content:
                         partial_message = partial_message + \
                             chunk.choices[0].delta.content
-                        yield partial_message
+                        yield history, messages_history
                 if partial_message and message:
                     write_chat_history_to_db(
                         f"{message}::::{partial_message}", "no_data")
@@ -610,7 +608,7 @@ async def bot(message, history):
 
             for token in response.response_gen:
                 stream_token += token
-                yield stream_token
+                yield history, messages_history
 
             if stream_token and message:
                 write_chat_history_to_db(
@@ -633,7 +631,7 @@ async def bot(message, history):
                 if chunk.choices[0].delta.content:
                     partial_message = partial_message + \
                         chunk.choices[0].delta.content
-                    yield partial_message
+                    yield history, messages_history
             if partial_message and message:
                 write_chat_history_to_db(
                     f"{message}::::{partial_message}", "no_data")
@@ -648,7 +646,7 @@ def update_debug_info(upload_file):
     return debug_info
 
 
-def update_source_info(chatbot):
+def update_source_info():
     global response_sources
     source_info = "Sources: \n"
     if response_sources == "No sources found.":
@@ -944,7 +942,6 @@ def set_session(evt: gr.SelectData):
 # _________________________________________________________________#
 # Define the Gradio interface
 
-
 # Load custom CSS
 with open(
     "./assets/custom.css",
@@ -956,19 +953,16 @@ with open(
 # Add the title
 title = """<h2 align="center">BLM Mostro <img src="file/assets/client.png" alt="client" style="display: inline;"></h2>"""
 
-chatbot = gr.Chatbot(value=get_chat_history(),
-                     elem_id="chuanhu_chatbot", height="850px")
-
-msg = gr.Textbox(
-    label=" 🪄",
-    placeholder="Type a message to the bot and press enter",
-    container=False,
-)
 clear = gr.Button("🧹 Start fresh")
 
 with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
     gr.Info("Please enter a valid OpenAI API key or set the env key.")
     gr.HTML(value=title)
+
+    session_state = gr.State([])
+    def user(user_message, history):
+        return "", history + [[user_message, None]]
+    
     with gr.Row():
         with gr.Column(scale=1, min_width=200):
             session_title = gr.Textbox(label="Session Title")
@@ -983,16 +977,14 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
         with gr.Column(scale=15):
             with gr.Row():
                 with gr.Column(scale=6):
-                    chat_interface = gr.ChatInterface(
-                        bot,
-                        chatbot=chatbot,
-                        textbox=msg,
-                        retry_btn=None,
-                        undo_btn=None,
-                        clear_btn=None,
-                        submit_btn=None
+                    chatbot = gr.Chatbot(value=get_chat_history(),
+                        elem_id="chuanhu_chatbot", height="850px")
+
+                    msg = gr.Textbox(
+                        label=" 🪄",
+                        placeholder="Type a message to the bot and press enter",
+                        container=False,
                     )
-                    chat_interface
                 with gr.Column(scale=4):
                     source_dataframe = gr.Dataframe(value=update_source,
                                                     headers=[
@@ -1138,10 +1130,11 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                     label="Debug Output",
                 )
 
-    response = msg.submit(update_source_info, inputs=[chatbot], outputs=sources).then(
+    msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
+        bot, [chatbot, session_state], [chatbot, session_state]).then(
         lambda: gr.update(value=get_chat_history()), None, outputs=[chatbot]).then(
         lambda: gr.update(value=update_source()), None, outputs=source_dataframe).then(
-            update_source_info, inputs=[chatbot], outputs=sources
+            update_source_info, None, outputs=sources
     ).then(
         lambda: gr.update(value=google_source_urls), None, outputs=google_search_dataframe)
 
@@ -1195,7 +1188,7 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
     session_list_dataframe.select(set_session, None, None).then(
         lambda: gr.update(value=get_chat_history()), None, outputs=[chatbot]).then(
         lambda: gr.update(value=update_source()), None, outputs=source_dataframe).then(
-            update_source_info, inputs=[chatbot], outputs=sources).then(
+            update_source_info, None, outputs=sources).then(
         lambda: gr.update(value=google_source_urls), None, outputs=google_search_dataframe)
 
     session_list_dataframe.input(update_session, inputs=[
