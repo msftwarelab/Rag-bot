@@ -61,6 +61,6 @@ class GoogleSearchToolSpec(BaseToolSpec):
                 siteSearch=self.siteSearch
         )
         response = requests.get(url)
-       
-        result_source=json.loads(response.text)['items']
+        
+        result_source=json.loads(response.text).get('items', [])
         return result_source

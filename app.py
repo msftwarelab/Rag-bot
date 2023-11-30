@@ -502,9 +502,12 @@ async def bot(history, messages_history):
                     ))]
             agent = OpenAIAgent.from_tools(
                 tools, verbose=True, prompt=custom_prompt)
-            # if history_message:
-            #     agent.memory.set(history_message)
-            response = agent.stream_chat(message)
+            if history_message:
+                # qa_message=f"Devi rispondere in italiano."
+                # history_message.append({"role": "user", "content": qa_message})
+                agent.memory.set(history_message)
+            qa_message = f"{message}.Devi rispondere in italiano."
+            response = agent.stream_chat(qa_message)
             # content_list = [item.content for item in response.sources]
             # print(content_list)
 
