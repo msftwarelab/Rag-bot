@@ -72,6 +72,10 @@ input[type=number].svelte-1cl284s{
     min-height: unset;
 }
 
+[class *="user"] {
+    color: #FFFFFF !important;
+}
+
 [data-testid="bot"] {
     max-width: 85%;
     border-bottom-left-radius: 0 !important;
