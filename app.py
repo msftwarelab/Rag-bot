@@ -16,16 +16,30 @@ from llama_index import (
     VectorStoreIndex,
     SimpleDirectoryReader,
     load_index_from_storage,
+    SummaryIndex,
     LLMPredictor,
 )
+from llama_index.node_parser import (
+    UnstructuredElementNodeParser,
+    SentenceSplitter
+)
+import torch
+from PIL import Image, ImageDraw
+import faiss
+import matplotlib.pyplot as plt
+from llama_index.objects import ObjectIndex, SimpleToolNodeMapping
 from llama_index import ServiceContext
 from llama_index.storage.storage_context import StorageContext
 from langchain.chat_models import ChatOpenAI
 from llama_index.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms import ChatMessage
+from llama_index.llms import OpenAI
 from llama_index.agent import OpenAIAgent, ContextRetrieverOpenAIAgent
 from langchain.embeddings import OpenAIEmbeddings
 from llama_index.tools.tool_spec.load_and_search.base import LoadAndSearchToolSpec
+from torchvision import models, transforms
+from transformers import AutoModelForObjectDetection
+import fitz
 import sys
 sys.path.append('./llama_hub/tools/google_search/')
 from base import GoogleSearchToolSpec
@@ -152,7 +166,7 @@ model = "gpt-4-1106-preview"
 openai.api_key = os.getenv("openai_key")
 service_context = gr.State('')
 indices = {}
-index_needs_update = {"company": True, "tender": True}
+index_needs_update = {"company": True, "tender": True, "summary": True, "top": True, "image": True}
 status = ""
 source_infor_results = []
 google_api_key = os.getenv('google_search_key')
@@ -168,6 +182,139 @@ google_upload_url = ''
 google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
                        'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+class MaxResize(object):
+    def __init__(self, max_size=800):
+        self.max_size = max_size
+
+    def __call__(self, image):
+        width, height = image.size
+        current_max_size = max(width, height)
+        scale = self.max_size / current_max_size
+        resized_image = image.resize(
+            (int(round(scale * width)), int(round(scale * height)))
+        )
+
+        return resized_image
+
+
+detection_transform = transforms.Compose(
+    [
+        MaxResize(800),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ]
+)
+
+structure_transform = transforms.Compose(
+    [
+        MaxResize(1000),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ]
+)
+
+# load table detection model
+# processor = TableTransformerImageProcessor(max_size=800)
+auto_model = AutoModelForObjectDetection.from_pretrained(
+    "microsoft/table-transformer-detection", revision="no_timm"
+).to(device)
+
+# load table structure recognition model
+# structure_processor = TableTransformerImageProcessor(max_size=1000)
+structure_model = AutoModelForObjectDetection.from_pretrained(
+    "microsoft/table-transformer-structure-recognition-v1.1-all"
+).to(device)
+
+
+# for output bounding box post-processing
+def box_cxcywh_to_xyxy(x):
+    x_c, y_c, w, h = x.unbind(-1)
+    b = [(x_c - 0.5 * w), (y_c - 0.5 * h), (x_c + 0.5 * w), (y_c + 0.5 * h)]
+    return torch.stack(b, dim=1)
+
+
+def rescale_bboxes(out_bbox, size):
+    width, height = size
+    boxes = box_cxcywh_to_xyxy(out_bbox)
+    boxes = boxes * torch.tensor(
+        [width, height, width, height], dtype=torch.float32
+    )
+    return boxes
+
+
+def outputs_to_objects(outputs, img_size, id2label):
+    m = outputs.logits.softmax(-1).max(-1)
+    pred_labels = list(m.indices.detach().cpu().numpy())[0]
+    pred_scores = list(m.values.detach().cpu().numpy())[0]
+    pred_bboxes = outputs["pred_boxes"].detach().cpu()[0]
+    pred_bboxes = [
+        elem.tolist() for elem in rescale_bboxes(pred_bboxes, img_size)
+    ]
+
+    objects = []
+    for label, score, bbox in zip(pred_labels, pred_scores, pred_bboxes):
+        class_label = id2label[int(label)]
+        if not class_label == "no object":
+            objects.append(
+                {
+                    "label": class_label,
+                    "score": float(score),
+                    "bbox": [float(elem) for elem in bbox],
+                }
+            )
+
+    return objects
+
+
+def detect_and_crop_save_table(
+    file_path, cropped_table_directory="./data/table_images/"
+):
+    image = Image.open(file_path)
+
+    filename, _ = os.path.splitext(file_path.split("/")[-1])
+
+    if not os.path.exists(cropped_table_directory):
+        os.makedirs(cropped_table_directory)
+
+    # prepare image for the model
+    # pixel_values = processor(image, return_tensors="pt").pixel_values
+    pixel_values = detection_transform(image).unsqueeze(0).to(device)
+
+    # forward pass
+    with torch.no_grad():
+        outputs = auto_model(pixel_values)
+
+    # postprocess to get detected tables
+    id2label = auto_model.config.id2label
+    id2label[len(auto_model.config.id2label)] = "no object"
+    detected_tables = outputs_to_objects(outputs, image.size, id2label)
+
+    # print(f"number of tables detected {len(detected_tables)}")
+
+    for idx in range(len(detected_tables)):
+        #   # crop detected table out of image
+        cropped_table = image.crop(detected_tables[idx]["bbox"])
+        file_name = os.path.basename(filename)
+        cropped_table.save(f"{cropped_table_directory}/{file_name}_{idx}.png")
+
+
+def plot_images(image_paths):
+    images_shown = 0
+    plt.figure(figsize=(16, 9))
+    for img_path in image_paths:
+        if os.path.isfile(img_path):
+            image = Image.open(img_path)
+
+            plt.subplot(2, 3, images_shown + 1)
+            plt.imshow(image)
+            plt.xticks([])
+            plt.yticks([])
+
+            images_shown += 1
+            if images_shown >= 9:
+                break
 
 def set_chatting_mode(value):
     global chatting_mode_status
@@ -258,6 +405,75 @@ def get_company_files_inform(directory_path):
     else:
         return [['No File', ' ']]
 
+def extract_images_from_pdf(pdf_path):
+    try:
+        doc = fitz.open(pdf_path)
+        
+        images = []
+        
+        # Create the 'data/image' folder if it doesn't exist
+        output_folder = 'data/image'
+        os.makedirs(output_folder, exist_ok=True)
+        
+        for page_num in range(doc.page_count):
+            page = doc[page_num]
+            images_on_page = page.get_images(full=True)
+            
+            for img_index, img_info in enumerate(images_on_page):
+                img_index = img_info[0]
+                base_image = doc.extract_image(img_index)
+                image_bytes = base_image["image"]
+                
+                # Save the image to the 'data/image' folder
+                image_filename = f"image_page_{page_num + 1}_index_{img_index}.png"
+                image_path = os.path.join(output_folder, image_filename)
+                with open(image_path, "wb") as img_file:
+                    img_file.write(image_bytes)
+                
+                images.append(image_path)
+        
+        return images
+    except fitz.fitz.FileDataError as e:
+        print(f"Error opening PDF '{pdf_path}': {e}")
+        return []
+
+def get_child_file_paths(directory_path):
+    # Get a list of file names in the specified directory
+    file_paths = [os.path.join(directory_path, f) for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f))]
+    
+    return file_paths
+
+# Function to load and preprocess an image
+def load_and_preprocess_image(file_path):
+    image = Image.open(file_path).convert('RGB')
+    preprocess = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    return preprocess(image).unsqueeze(0)
+
+# Function to extract features from an image using a pre-trained model
+def extract_features(image_path, model):
+    model.eval()
+    img = load_and_preprocess_image(image_path)
+    with torch.no_grad():
+        features = model(img)
+    return features.numpy()
+
+# Function to create an index using Faiss
+def create_image_index(image_folder, model):
+    index = faiss.IndexFlatL2(2048)  # Assuming the model outputs 2048-dimensional features
+
+    image_paths = [os.path.join(image_folder, f) for f in os.listdir(image_folder) if f.endswith('.png') or f.endswith('.jpg')]
+
+    # Iterate over images and add them to the index
+    for image_path in image_paths:
+        features = extract_features(image_path, model)
+        index.add(features)
+
+    return index, image_paths
+
 # ________________________________________________________
 # Modified load_index function to handle multiple indices
 
@@ -267,8 +483,41 @@ def load_index(directory_path, index_key):
     global doc_ids
     documents = SimpleDirectoryReader(
         directory_path, filename_as_id=True).load_data()
+        
     doc_ids[index_key] = [x.doc_id for x in documents]
-    # print(documents.id_)
+
+    child_file_paths = get_child_file_paths(directory_path)
+    for index, value in enumerate(child_file_paths):
+        images = extract_images_from_pdf(value)    
+        for file_path in images:
+            detect_and_crop_save_table(file_path)
+
+    # Load a pre-trained ResNet model
+    resnet_model = models.resnet50(pretrained=True)
+    resnet_model.fc = torch.nn.Sequential()  # Remove the final fully connected layer
+
+    image_index, image_paths = create_image_index('data/table_images', resnet_model)
+    indices["image"] = image_index
+    llm = OpenAI(temperature=0, model=model)
+    service_context = ServiceContext.from_defaults(llm=llm)
+    node_parser = SentenceSplitter()
+
+    all_tools = []
+    for index, value in enumerate(documents):
+        summary = (
+            f"This content about document. Use"
+            f" this tool if you want to answer any questions about document.\n"
+        )
+        doc_tool = QueryEngineTool(
+            query_engine=value,
+            metadata=ToolMetadata(
+                name=f"tool_{index}",
+                description=summary,
+            ),
+        )
+        all_tools.append(doc_tool)
+    tool_mapping = SimpleToolNodeMapping.from_objects(all_tools)
+
     status += f"loaded documents with {len(documents)} pages.\n"
     if index_key in indices:
         # If index already exists, just update it
@@ -281,6 +530,7 @@ def load_index(directory_path, index_key):
                 persist_dir=f"./storage/{index_key}"
             )
             index = load_index_from_storage(storage_context)
+            obj_index = ObjectIndex(index, tool_mapping)
             status += f"Index for {index_key} loaded from storage.\n"
             logging.info(f"Index for {index_key} loaded from storage.")
         except FileNotFoundError:
@@ -289,9 +539,20 @@ def load_index(directory_path, index_key):
                 f"Index for {index_key} not found. Creating a new one...")
             index = VectorStoreIndex.from_documents(documents)
             index.storage_context.persist(f"./storage/{index_key}")
+            obj_index = ObjectIndex.from_objects(
+                all_tools,
+                tool_mapping,
+                VectorStoreIndex,
+                storage_context=storage_context
+            )
             status += f"New index for {index_key} created and persisted to storage.\n"
             logging.info(
                 f"New index for {index_key} created and persisted to storage.")
+        nodes = node_parser.get_nodes_from_documents(documents)
+        # build summary index
+        summary_index = SummaryIndex(nodes, service_context=service_context)
+        indices["summary"] = summary_index
+        indices["top"] = obj_index
         # Save the loaded/created index in indices dict
         indices[index_key] = index
     index.refresh_ref_docs(documents)
@@ -357,6 +618,9 @@ def upload_file(files, index_key):
         # Load or update the index
     else:
         index_needs_update[index_key] = True
+        index_needs_update['summary'] = True
+        index_needs_update['top'] = True
+        index_needs_update['image'] = True
         load_or_update_index(directory_path, index_key)
         gr.Info("Documents are indexed")
     return "Files uploaded successfully!!!"
@@ -451,6 +715,9 @@ async def bot(history, messages_history):
         try:
             company = indices.get("company")
             tender = indices.get("tender")
+            summary = indices.get("summary")
+            obj_index = indices.get("top")
+            image_index = indices.get("image")
         except Exception as e:
             if str(e) == "expected string or bytes-like object":
                 gr.Warning(
@@ -467,27 +734,66 @@ async def bot(history, messages_history):
             elif tender is None:
                 company_query_engine = company.as_query_engine(
                     similarity_top_k=5)
+                summary_query_engine = summary.as_query_engine()
                 tools = [
                     QueryEngineTool(
-                        query_engine=company_query_engine,
-                        metadata=ToolMetadata(
-                            name='company_index',
-                            description=f'{company_description}'
-                        ))]
+                    query_engine=company_query_engine,
+                    metadata=ToolMetadata(
+                        name='company_index',
+                        description=f'{company_description}'
+                    )),
+                    QueryEngineTool(
+                    query_engine=summary_query_engine,
+                    metadata=ToolMetadata(
+                        name="summary_tool",
+                        description=(
+                            "Useful for any requests that require a holistic summary"
+                            f" of EVERYTHING. For questions about"
+                            " more specific sections, please use the vector_tool."
+                        ),
+                    )),
+                    QueryEngineTool(
+                    query_engine=image_index,
+                    metadata=ToolMetadata(
+                        name="image_tool",
+                        description=(
+                            "Useful for any requests that require a image"
+                        ),
+                    ))]
             elif company is None:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
+                summary_query_engine = summary.as_query_engine()
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
                         name='tender_index',
                         description=f'{tender_description}'
+                    )),
+                    QueryEngineTool(
+                    query_engine=summary_query_engine,
+                    metadata=ToolMetadata(
+                        name="summary_tool",
+                        description=(
+                            "Useful for any requests that require a holistic summary"
+                            f" of EVERYTHING. For questions about"
+                            " more specific sections, please use the vector_tool."
+                        ),
+                    )),
+                    QueryEngineTool(
+                    query_engine=image_index,
+                    metadata=ToolMetadata(
+                        name="image_tool",
+                        description=(
+                            "Useful for any requests that require a image"
+                        ),
                     ))]
             else:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
                 company_query_engine = company.as_query_engine(
                     similarity_top_k=5)
+                summary_query_engine = summary.as_query_engine()
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
@@ -499,6 +805,24 @@ async def bot(history, messages_history):
                     metadata=ToolMetadata(
                         name='company_index',
                         description=f'{company_description}'
+                    )),
+                    QueryEngineTool(
+                    query_engine=summary_query_engine,
+                    metadata=ToolMetadata(
+                        name="summary_tool",
+                        description=(
+                            "Useful for any requests that require a holistic summary"
+                            f" of EVERYTHING. For questions about"
+                            " more specific sections, please use the vector_tool."
+                        ),
+                    )),
+                    QueryEngineTool(
+                    query_engine=image_index,
+                    metadata=ToolMetadata(
+                        name="image_tool",
+                        description=(
+                            "Useful for any requests that require a image"
+                        ),
                     ))]
             agent = OpenAIAgent.from_tools(
                 tools, verbose=True, prompt=custom_prompt)
@@ -544,27 +868,66 @@ async def bot(history, messages_history):
             elif tender is None:
                 company_query_engine = company.as_query_engine(
                     similarity_top_k=5)
+                summary_query_engine = summary.as_query_engine()
                 tools = [
                     QueryEngineTool(
                         query_engine=company_query_engine,
                         metadata=ToolMetadata(
                             name='company_index',
                             description=f'{company_description}'
-                        ))]
+                        )),
+                    QueryEngineTool(
+                        query_engine=summary_query_engine,
+                        metadata=ToolMetadata(
+                            name="summary_tool",
+                            description=(
+                                "Useful for any requests that require a holistic summary"
+                                f" of EVERYTHING. For questions about"
+                                " more specific sections, please use the vector_tool."
+                            ),
+                        )),
+                    QueryEngineTool(
+                    query_engine=image_index,
+                    metadata=ToolMetadata(
+                        name="image_tool",
+                        description=(
+                            "Useful for any requests that require a image"
+                        ),
+                    ))]
             elif company is None:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
+                summary_query_engine = summary.as_query_engine()
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
                         name='tender_index',
                         description=f'{tender_description}'
+                    )),
+                    QueryEngineTool(
+                    query_engine=summary_query_engine,
+                    metadata=ToolMetadata(
+                        name="summary_tool",
+                        description=(
+                            "Useful for any requests that require a holistic summary"
+                            f" of EVERYTHING. For questions about"
+                            " more specific sections, please use the vector_tool."
+                        ),
+                    )),
+                    QueryEngineTool(
+                    query_engine=image_index,
+                    metadata=ToolMetadata(
+                        name="image_tool",
+                        description=(
+                            "Useful for any requests that require a image"
+                        ),
                     ))]
             else:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
                 company_query_engine = company.as_query_engine(
                     similarity_top_k=5)
+                summary_query_engine = summary.as_query_engine()
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
@@ -576,6 +939,24 @@ async def bot(history, messages_history):
                     metadata=ToolMetadata(
                         name='company_index',
                         description=f'{company_description}'
+                    )),
+                    QueryEngineTool(
+                    query_engine=summary_query_engine,
+                    metadata=ToolMetadata(
+                        name="summary_tool",
+                        description=(
+                            "Useful for any requests that require a holistic summary"
+                            f" of EVERYTHING. For questions about"
+                            " more specific sections, please use the vector_tool."
+                        ),
+                    )),
+                    QueryEngineTool(
+                    query_engine=image_index,
+                    metadata=ToolMetadata(
+                        name="image_tool",
+                        description=(
+                            "Useful for any requests that require a image"
+                        ),
                     ))]
             google_spec = GoogleSearchToolSpec(
                 key=google_api_key, engine=google_engine_id, siteSearch=google_upload_url)
@@ -583,7 +964,7 @@ async def bot(history, messages_history):
                 google_spec.to_tool_list()[0]
             ).to_tool_list()
             agent = OpenAIAgent.from_tools(
-                [*tools, *google_tools], verbose=True, prompt=custom_prompt)
+                [*tools, *google_tools], tool_retriever=obj_index.as_retriever(similarity_top_k=3), verbose=True, prompt=custom_prompt)
             if history_message:
                 # qa_message=f"Devi rispondere in italiano."
                 # history_message.append({"role": "user", "content": qa_message})
@@ -954,7 +1335,7 @@ with open(
     customCSS = f.read()
 
 # Add the title
-title = """<h2 align="center">BLM Mostro <img src="file/assets/client.png" alt="client" style="display: inline;"></h2>"""
+title = f"""<h2 align="center">BLM Mostro <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACiklEQVR4AWIYSoAP0Hw5wMoRhVE4i8zOvtq2bSNOjbC2jaC27Tasbdt2g9q27duT5Ezy93a9M807ybd392LO9fwLmoIF4AJ4BX6Bb+AROAAmgOput9trp3F2MA98AkpgGb8BSuMO6O5yucyYXTmK/uALUBytIo+0UfZkvs4NUD16d5crJT73AMWRD8ZoUiPdxLwNQKqsqFuRpidEx/tG7E2jC2z8DOQVZQlIjoH+2myZNK9r5Xk8HjeSWUCRcRGYuw0kh0SjLzBNHqCD+YGuikDXJKAE3UFITQBKoymIWj6fz83NqAQ/uFwBVZLr9QIUBW3BNrAMxKLS3IQTaDqFnbiA5Ql4TLewQmttfY1onblUXp/PdIvfJpJb9Gis18/PghvsnVNqTZ9TesFQFrzjZrJdmAEDyQqgSF5ZfkLufFDfTnOepH36iZA33hd5y4E1aJTSxj60BefAN+GzyCrMyoxzMMV358SN2J5+R+TxU1yf/6Hi9LuSaDqQnRlnMEUZnXTmndL2ryWAqb4J74FVNm/C1uCE5rNEVjilHcOGwDZxMAeAEvSUdUaJi6iqgydgHVCkoCwvzMxrfI87fRVfME3zH59dLGweIDSLWvo7RXsZtQ7UpryIggqyIxvAkjhex1e4vCVFrHHJFWJQs+wKSEzTHygg+QUqh9soZ2TorYdk3NF5A8+gJgYhgv4grDKCK2I5cmodPKQ/iBfMB1DTyvN6vW4k04T5LL8/IeINnp7Rr+KDB3Lk64KE5aVF3fKgstWejDAMI2JzGSGPAT8i+GPSnfl6vQeclbhUECwTHbH4xGv7mTQlzzhrSeM115elM5fhhhZcfGDAMQ/UZfjlrNwQlBQXjhnPc/4Aqf7wDR6odCYAAAAASUVORK5CYII=" alt="client" style="display: inline;"></h2>"""
 
 clear = gr.Button("🧹 Start fresh")
 
