@@ -166,7 +166,7 @@ model = "gpt-4-1106-preview"
 openai.api_key = os.getenv("openai_key")
 service_context = gr.State('')
 indices = {}
-index_needs_update = {"company": True, "tender": True, "summary": True, "top": True, "image": True}
+index_needs_update = {"company": True, "tender": True}
 status = ""
 source_infor_results = []
 google_api_key = os.getenv('google_search_key')
@@ -618,9 +618,6 @@ def upload_file(files, index_key):
         # Load or update the index
     else:
         index_needs_update[index_key] = True
-        index_needs_update['summary'] = True
-        index_needs_update['top'] = True
-        index_needs_update['image'] = True
         load_or_update_index(directory_path, index_key)
         gr.Info("Documents are indexed")
     return "Files uploaded successfully!!!"
