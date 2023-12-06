@@ -1,8 +1,9 @@
 import webbrowser
+import camelot
 from dotenv import load_dotenv
 from datetime import datetime
 import pandas as pd
-from llama_index.query_engine import SubQuestionQueryEngine
+from llama_index.query_engine import PandasQueryEngine, SubQuestionQueryEngine
 from llama_index.response.schema import StreamingResponse
 import gradio as gr
 import sys
@@ -36,9 +37,11 @@ from llama_index.llms import ChatMessage
 from llama_index.llms import OpenAI
 from llama_index.agent import OpenAIAgent, ContextRetrieverOpenAIAgent
 from langchain.embeddings import OpenAIEmbeddings
+from llama_hub.file.pymu_pdf.base import PyMuPDFReader
 from llama_index.tools.tool_spec.load_and_search.base import LoadAndSearchToolSpec
 from torchvision import models, transforms
 from transformers import AutoModelForObjectDetection
+from typing import List
 import fitz
 import sys
 sys.path.append('./llama_hub/tools/google_search/')
@@ -474,6 +477,21 @@ def create_image_index(image_folder, model):
 
     return index, image_paths
 
+# use camelot to parse tables
+def get_tables(path: str, pages: List[int]):
+    table_dfs = []
+    print(path)
+    for page in pages:
+        table_list = camelot.read_pdf(path, flavor='stream', pages='all')
+        table_df = table_list[0].df
+        table_df = (
+            table_df.rename(columns=table_df.iloc[0])
+            .drop(table_df.index[0])
+            .reset_index(drop=True)
+        )
+        table_dfs.append(table_df)
+    return table_dfs
+
 # ________________________________________________________
 # Modified load_index function to handle multiple indices
 
@@ -486,21 +504,32 @@ def load_index(directory_path, index_key):
         
     doc_ids[index_key] = [x.doc_id for x in documents]
 
-    child_file_paths = get_child_file_paths(directory_path)
-    for index, value in enumerate(child_file_paths):
-        images = extract_images_from_pdf(value)    
-        for file_path in images:
-            detect_and_crop_save_table(file_path)
-
-    # Load a pre-trained ResNet model
-    resnet_model = models.resnet50(pretrained=True)
-    resnet_model.fc = torch.nn.Sequential()  # Remove the final fully connected layer
-
-    image_index, image_paths = create_image_index('data/table_images', resnet_model)
-    indices["image"] = image_index
     llm = OpenAI(temperature=0, model=model)
     service_context = ServiceContext.from_defaults(llm=llm)
     node_parser = SentenceSplitter()
+
+    reader = PyMuPDFReader()
+    child_file_paths = get_child_file_paths(directory_path)
+    for index, value in enumerate(child_file_paths):
+        docs = reader.load(value)
+        table_dfs = get_tables(value, pages=[3, 25])
+        df_query_engines = [
+            PandasQueryEngine(table_df, service_context=service_context)
+            for table_df in table_dfs
+        ]
+        indices["image"] = df_query_engines
+
+    # for index, value in enumerate(child_file_paths):
+    #     images = extract_images_from_pdf(value)    
+    #     for file_path in images:
+    #         detect_and_crop_save_table(file_path)
+
+    # # Load a pre-trained ResNet model
+    # resnet_model = models.resnet50(pretrained=True)
+    # resnet_model.fc = torch.nn.Sequential()  # Remove the final fully connected layer
+
+    # image_index, image_paths = create_image_index('data/table_images', resnet_model)
+    # indices["image"] = image_index
 
     all_tools = []
     for index, value in enumerate(documents):
@@ -752,9 +781,9 @@ async def bot(history, messages_history):
                     QueryEngineTool(
                     query_engine=image_index,
                     metadata=ToolMetadata(
-                        name="image_tool",
+                        name="table_tool",
                         description=(
-                            "Useful for any requests that require a image"
+                            "Useful for any requests that require a table"
                         ),
                     ))]
             elif company is None:
@@ -780,9 +809,9 @@ async def bot(history, messages_history):
                     QueryEngineTool(
                     query_engine=image_index,
                     metadata=ToolMetadata(
-                        name="image_tool",
+                        name="table_tool",
                         description=(
-                            "Useful for any requests that require a image"
+                            "Useful for any requests that require a table"
                         ),
                     ))]
             else:
@@ -816,9 +845,9 @@ async def bot(history, messages_history):
                     QueryEngineTool(
                     query_engine=image_index,
                     metadata=ToolMetadata(
-                        name="image_tool",
+                        name="table_tool",
                         description=(
-                            "Useful for any requests that require a image"
+                            "Useful for any requests that require a table"
                         ),
                     ))]
             agent = OpenAIAgent.from_tools(
@@ -886,9 +915,9 @@ async def bot(history, messages_history):
                     QueryEngineTool(
                     query_engine=image_index,
                     metadata=ToolMetadata(
-                        name="image_tool",
+                        name="table_tool",
                         description=(
-                            "Useful for any requests that require a image"
+                            "Useful for any requests that require a table"
                         ),
                     ))]
             elif company is None:
@@ -914,9 +943,9 @@ async def bot(history, messages_history):
                     QueryEngineTool(
                     query_engine=image_index,
                     metadata=ToolMetadata(
-                        name="image_tool",
+                        name="table_tool",
                         description=(
-                            "Useful for any requests that require a image"
+                            "Useful for any requests that require a table"
                         ),
                     ))]
             else:
@@ -950,9 +979,9 @@ async def bot(history, messages_history):
                     QueryEngineTool(
                     query_engine=image_index,
                     metadata=ToolMetadata(
-                        name="image_tool",
+                        name="table_tool",
                         description=(
-                            "Useful for any requests that require a image"
+                            "Useful for any requests that require a table"
                         ),
                     ))]
             google_spec = GoogleSearchToolSpec(

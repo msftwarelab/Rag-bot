@@ -15,5 +15,5 @@ matplotlib
 Pillow
 pandas
 docx2txt
-PyMuPDF
+camelot-py[cv]
 faiss-cpu
