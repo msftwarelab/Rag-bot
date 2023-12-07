@@ -4,7 +4,7 @@ gradio == 4.7.1
 llama-hub == 0.0.47
 langchain == 0.0.340
 torch
-pypdf
+pypdf == 3.17.1
 docx2txt
 PyMuPDF 
 python-dotenv
