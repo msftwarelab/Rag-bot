@@ -1,9 +1,8 @@
 import webbrowser
-import camelot
 from dotenv import load_dotenv
 from datetime import datetime
 import pandas as pd
-from llama_index.query_engine import PandasQueryEngine, SubQuestionQueryEngine
+from llama_index.query_engine import SubQuestionQueryEngine
 from llama_index.response.schema import StreamingResponse
 import gradio as gr
 import sys
@@ -17,37 +16,32 @@ from llama_index import (
     VectorStoreIndex,
     SimpleDirectoryReader,
     load_index_from_storage,
-    SummaryIndex,
     LLMPredictor,
 )
-from llama_index.node_parser import (
-    UnstructuredElementNodeParser,
-    SentenceSplitter
-)
-import torch
-from PIL import Image, ImageDraw
-import faiss
-import matplotlib.pyplot as plt
-from llama_index.objects import ObjectIndex, SimpleToolNodeMapping
 from llama_index import ServiceContext
 from llama_index.storage.storage_context import StorageContext
 from langchain.chat_models import ChatOpenAI
+from llama_index.llms import OpenAI
 from llama_index.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms import ChatMessage
-from llama_index.llms import OpenAI
 from llama_index.agent import OpenAIAgent, ContextRetrieverOpenAIAgent
 from langchain.embeddings import OpenAIEmbeddings
-from llama_hub.file.pymu_pdf.base import PyMuPDFReader
 from llama_index.tools.tool_spec.load_and_search.base import LoadAndSearchToolSpec
-from torchvision import models, transforms
-from transformers import AutoModelForObjectDetection
-from typing import List
-import fitz
 import sys
+import psutil
 sys.path.append('./llama_hub/tools/google_search/')
 from base import GoogleSearchToolSpec
+
+from llama_index.llama_pack import download_llama_pack
+
+# download and install dependencies
+RAGatouilleRetrieverPack = download_llama_pack(
+  "RAGatouilleRetrieverPack", "./ragatouille_pack"
+)
+
 # Load environment variables from .env file
 load_dotenv()
+
 # _________________________________________________________________#
 # Establish a connection to the SQLite database
 
@@ -185,139 +179,6 @@ google_upload_url = ''
 google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
                        'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-class MaxResize(object):
-    def __init__(self, max_size=800):
-        self.max_size = max_size
-
-    def __call__(self, image):
-        width, height = image.size
-        current_max_size = max(width, height)
-        scale = self.max_size / current_max_size
-        resized_image = image.resize(
-            (int(round(scale * width)), int(round(scale * height)))
-        )
-
-        return resized_image
-
-
-detection_transform = transforms.Compose(
-    [
-        MaxResize(800),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    ]
-)
-
-structure_transform = transforms.Compose(
-    [
-        MaxResize(1000),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    ]
-)
-
-# load table detection model
-# processor = TableTransformerImageProcessor(max_size=800)
-auto_model = AutoModelForObjectDetection.from_pretrained(
-    "microsoft/table-transformer-detection", revision="no_timm"
-).to(device)
-
-# load table structure recognition model
-# structure_processor = TableTransformerImageProcessor(max_size=1000)
-structure_model = AutoModelForObjectDetection.from_pretrained(
-    "microsoft/table-transformer-structure-recognition-v1.1-all"
-).to(device)
-
-
-# for output bounding box post-processing
-def box_cxcywh_to_xyxy(x):
-    x_c, y_c, w, h = x.unbind(-1)
-    b = [(x_c - 0.5 * w), (y_c - 0.5 * h), (x_c + 0.5 * w), (y_c + 0.5 * h)]
-    return torch.stack(b, dim=1)
-
-
-def rescale_bboxes(out_bbox, size):
-    width, height = size
-    boxes = box_cxcywh_to_xyxy(out_bbox)
-    boxes = boxes * torch.tensor(
-        [width, height, width, height], dtype=torch.float32
-    )
-    return boxes
-
-
-def outputs_to_objects(outputs, img_size, id2label):
-    m = outputs.logits.softmax(-1).max(-1)
-    pred_labels = list(m.indices.detach().cpu().numpy())[0]
-    pred_scores = list(m.values.detach().cpu().numpy())[0]
-    pred_bboxes = outputs["pred_boxes"].detach().cpu()[0]
-    pred_bboxes = [
-        elem.tolist() for elem in rescale_bboxes(pred_bboxes, img_size)
-    ]
-
-    objects = []
-    for label, score, bbox in zip(pred_labels, pred_scores, pred_bboxes):
-        class_label = id2label[int(label)]
-        if not class_label == "no object":
-            objects.append(
-                {
-                    "label": class_label,
-                    "score": float(score),
-                    "bbox": [float(elem) for elem in bbox],
-                }
-            )
-
-    return objects
-
-
-def detect_and_crop_save_table(
-    file_path, cropped_table_directory="./data/table_images/"
-):
-    image = Image.open(file_path)
-
-    filename, _ = os.path.splitext(file_path.split("/")[-1])
-
-    if not os.path.exists(cropped_table_directory):
-        os.makedirs(cropped_table_directory)
-
-    # prepare image for the model
-    # pixel_values = processor(image, return_tensors="pt").pixel_values
-    pixel_values = detection_transform(image).unsqueeze(0).to(device)
-
-    # forward pass
-    with torch.no_grad():
-        outputs = auto_model(pixel_values)
-
-    # postprocess to get detected tables
-    id2label = auto_model.config.id2label
-    id2label[len(auto_model.config.id2label)] = "no object"
-    detected_tables = outputs_to_objects(outputs, image.size, id2label)
-
-    # print(f"number of tables detected {len(detected_tables)}")
-
-    for idx in range(len(detected_tables)):
-        #   # crop detected table out of image
-        cropped_table = image.crop(detected_tables[idx]["bbox"])
-        file_name = os.path.basename(filename)
-        cropped_table.save(f"{cropped_table_directory}/{file_name}_{idx}.png")
-
-
-def plot_images(image_paths):
-    images_shown = 0
-    plt.figure(figsize=(16, 9))
-    for img_path in image_paths:
-        if os.path.isfile(img_path):
-            image = Image.open(img_path)
-
-            plt.subplot(2, 3, images_shown + 1)
-            plt.imshow(image)
-            plt.xticks([])
-            plt.yticks([])
-
-            images_shown += 1
-            if images_shown >= 9:
-                break
 
 def set_chatting_mode(value):
     global chatting_mode_status
@@ -363,13 +224,15 @@ def getSessionList():
 getSessionList()
 # _______________________________________________________
 # pdf viewer
-
-
 def pdf_view_url():
     # Use an HTML iframe element to embed the PDF viewer.
     pdf_viewer_html = f'<iframe src="file/assets/pdf_viewer.html" width="100%" height="470px"></iframe>'
     return pdf_viewer_html
 
+def get_available_storage():
+    disk_usage = psutil.disk_usage('/')
+    available_storage_gb = disk_usage.free / (2**30)  # Convert bytes to GB
+    return f"Available Storage: {available_storage_gb:.2f} GB"
 
 def get_tender_files_inform(directory_path):
     global file_tender_inform_datas
@@ -379,7 +242,7 @@ def get_tender_files_inform(directory_path):
     # file_names = [open(f'./data/tender/{file}','rb') for file in files]
     # print(f"---get_file---{file_names}----")
     if len(files) > 0:
-        load_or_update_index('./data/tender/', 'tender')
+        load_or_update_index(f"./data/tender/{current_session_id}/", 'tender')
     file_inform_data = []
     file_tender_inform_datas = []
     for file_number, file_name in enumerate(files, start=1):
@@ -397,7 +260,7 @@ def get_company_files_inform(directory_path):
         os.makedirs(directory_path)
     files = os.listdir(directory_path)
     if len(files) > 0:
-        load_or_update_index('./data/company/', 'company')
+        load_or_update_index(f"./data/company/{current_session_id}/", 'company')
     file_inform_data = []
     file_company_inform_datas = []
     for file_number, file_name in enumerate(files, start=1):
@@ -408,90 +271,6 @@ def get_company_files_inform(directory_path):
     else:
         return [['No File', ' ']]
 
-def extract_images_from_pdf(pdf_path):
-    try:
-        doc = fitz.open(pdf_path)
-        
-        images = []
-        
-        # Create the 'data/image' folder if it doesn't exist
-        output_folder = 'data/image'
-        os.makedirs(output_folder, exist_ok=True)
-        
-        for page_num in range(doc.page_count):
-            page = doc[page_num]
-            images_on_page = page.get_images(full=True)
-            
-            for img_index, img_info in enumerate(images_on_page):
-                img_index = img_info[0]
-                base_image = doc.extract_image(img_index)
-                image_bytes = base_image["image"]
-                
-                # Save the image to the 'data/image' folder
-                image_filename = f"image_page_{page_num + 1}_index_{img_index}.png"
-                image_path = os.path.join(output_folder, image_filename)
-                with open(image_path, "wb") as img_file:
-                    img_file.write(image_bytes)
-                
-                images.append(image_path)
-        
-        return images
-    except fitz.fitz.FileDataError as e:
-        print(f"Error opening PDF '{pdf_path}': {e}")
-        return []
-
-def get_child_file_paths(directory_path):
-    # Get a list of file names in the specified directory
-    file_paths = [os.path.join(directory_path, f) for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f))]
-    
-    return file_paths
-
-# Function to load and preprocess an image
-def load_and_preprocess_image(file_path):
-    image = Image.open(file_path).convert('RGB')
-    preprocess = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    return preprocess(image).unsqueeze(0)
-
-# Function to extract features from an image using a pre-trained model
-def extract_features(image_path, model):
-    model.eval()
-    img = load_and_preprocess_image(image_path)
-    with torch.no_grad():
-        features = model(img)
-    return features.numpy()
-
-# Function to create an index using Faiss
-def create_image_index(image_folder, model):
-    index = faiss.IndexFlatL2(2048)  # Assuming the model outputs 2048-dimensional features
-
-    image_paths = [os.path.join(image_folder, f) for f in os.listdir(image_folder) if f.endswith('.png') or f.endswith('.jpg')]
-
-    # Iterate over images and add them to the index
-    for image_path in image_paths:
-        features = extract_features(image_path, model)
-        index.add(features)
-
-    return index, image_paths
-
-# use camelot to parse tables
-def get_tables(path: str, pages: List[int]):
-    table_dfs = []
-    print(path)
-    for page in pages:
-        table_list = camelot.read_pdf(path, flavor='stream', pages='all')
-        table_df = table_list[0].df
-        table_df = (
-            table_df.rename(columns=table_df.iloc[0])
-            .drop(table_df.index[0])
-            .reset_index(drop=True)
-        )
-        table_dfs.append(table_df)
-    return table_dfs
-
 # ________________________________________________________
 # Modified load_index function to handle multiple indices
 
@@ -501,52 +280,8 @@ def load_index(directory_path, index_key):
     global doc_ids
     documents = SimpleDirectoryReader(
         directory_path, filename_as_id=True).load_data()
-        
     doc_ids[index_key] = [x.doc_id for x in documents]
-
-    llm = OpenAI(temperature=0, model=model)
-    service_context = ServiceContext.from_defaults(llm=llm)
-    node_parser = SentenceSplitter()
-
-    reader = PyMuPDFReader()
-    child_file_paths = get_child_file_paths(directory_path)
-    for index, value in enumerate(child_file_paths):
-        docs = reader.load(value)
-        table_dfs = get_tables(value, pages=[3, 25])
-        df_query_engines = [
-            PandasQueryEngine(table_df, service_context=service_context)
-            for table_df in table_dfs
-        ]
-        indices["image"] = df_query_engines
-
-    # for index, value in enumerate(child_file_paths):
-    #     images = extract_images_from_pdf(value)    
-    #     for file_path in images:
-    #         detect_and_crop_save_table(file_path)
-
-    # # Load a pre-trained ResNet model
-    # resnet_model = models.resnet50(pretrained=True)
-    # resnet_model.fc = torch.nn.Sequential()  # Remove the final fully connected layer
-
-    # image_index, image_paths = create_image_index('data/table_images', resnet_model)
-    # indices["image"] = image_index
-
-    all_tools = []
-    for index, value in enumerate(documents):
-        summary = (
-            f"This content about document. Use"
-            f" this tool if you want to answer any questions about document.\n"
-        )
-        doc_tool = QueryEngineTool(
-            query_engine=value,
-            metadata=ToolMetadata(
-                name=f"tool_{index}",
-                description=summary,
-            ),
-        )
-        all_tools.append(doc_tool)
-    tool_mapping = SimpleToolNodeMapping.from_objects(all_tools)
-
+    # print(documents.id_)
     status += f"loaded documents with {len(documents)} pages.\n"
     if index_key in indices:
         # If index already exists, just update it
@@ -559,7 +294,6 @@ def load_index(directory_path, index_key):
                 persist_dir=f"./storage/{index_key}"
             )
             index = load_index_from_storage(storage_context)
-            obj_index = ObjectIndex(index, tool_mapping)
             status += f"Index for {index_key} loaded from storage.\n"
             logging.info(f"Index for {index_key} loaded from storage.")
         except FileNotFoundError:
@@ -568,20 +302,9 @@ def load_index(directory_path, index_key):
                 f"Index for {index_key} not found. Creating a new one...")
             index = VectorStoreIndex.from_documents(documents)
             index.storage_context.persist(f"./storage/{index_key}")
-            obj_index = ObjectIndex.from_objects(
-                all_tools,
-                tool_mapping,
-                VectorStoreIndex,
-                storage_context=storage_context
-            )
             status += f"New index for {index_key} created and persisted to storage.\n"
             logging.info(
                 f"New index for {index_key} created and persisted to storage.")
-        nodes = node_parser.get_nodes_from_documents(documents)
-        # build summary index
-        summary_index = SummaryIndex(nodes, service_context=service_context)
-        indices["summary"] = summary_index
-        indices["top"] = obj_index
         # Save the loaded/created index in indices dict
         indices[index_key] = index
     index.refresh_ref_docs(documents)
@@ -595,6 +318,7 @@ def load_or_update_index(directory, index_key):
     global indices
     global index_needs_update
     global status
+    print(get_available_storage())
     if index_key not in index_needs_update or index_needs_update[index_key]:
         indices[index_key] = load_index(directory, index_key)
         index_needs_update[index_key] = False
@@ -610,7 +334,7 @@ def upload_file(files, index_key):
     global google_source_urls
     global google_upload_url
     gr.Info("Indexing(uploading...)Please check the Debug output")
-    directory_path = f"data/{index_key}"
+    directory_path = f"data/{index_key}/{current_session_id}"
     # Check if the directory exists, if not, create it
     if not os.path.exists(directory_path):
         os.makedirs(directory_path)
@@ -645,6 +369,7 @@ def upload_file(files, index_key):
                     google_source_urls.append(['question']+value)
                     # Do something with the file content, e.g., print it
         # Load or update the index
+        print(google_source_urls)
     else:
         index_needs_update[index_key] = True
         load_or_update_index(directory_path, index_key)
@@ -741,9 +466,6 @@ async def bot(history, messages_history):
         try:
             company = indices.get("company")
             tender = indices.get("tender")
-            summary = indices.get("summary")
-            obj_index = indices.get("top")
-            image_index = indices.get("image")
         except Exception as e:
             if str(e) == "expected string or bytes-like object":
                 gr.Warning(
@@ -760,66 +482,27 @@ async def bot(history, messages_history):
             elif tender is None:
                 company_query_engine = company.as_query_engine(
                     similarity_top_k=5)
-                summary_query_engine = summary.as_query_engine()
                 tools = [
                     QueryEngineTool(
-                    query_engine=company_query_engine,
-                    metadata=ToolMetadata(
-                        name='company_index',
-                        description=f'{company_description}'
-                    )),
-                    QueryEngineTool(
-                    query_engine=summary_query_engine,
-                    metadata=ToolMetadata(
-                        name="summary_tool",
-                        description=(
-                            "Useful for any requests that require a holistic summary"
-                            f" of EVERYTHING. For questions about"
-                            " more specific sections, please use the vector_tool."
-                        ),
-                    )),
-                    QueryEngineTool(
-                    query_engine=image_index,
-                    metadata=ToolMetadata(
-                        name="table_tool",
-                        description=(
-                            "Useful for any requests that require a table"
-                        ),
-                    ))]
+                        query_engine=company_query_engine,
+                        metadata=ToolMetadata(
+                            name='company_index',
+                            description=f'{company_description}'
+                        ))]
             elif company is None:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
-                summary_query_engine = summary.as_query_engine()
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
                         name='tender_index',
                         description=f'{tender_description}'
-                    )),
-                    QueryEngineTool(
-                    query_engine=summary_query_engine,
-                    metadata=ToolMetadata(
-                        name="summary_tool",
-                        description=(
-                            "Useful for any requests that require a holistic summary"
-                            f" of EVERYTHING. For questions about"
-                            " more specific sections, please use the vector_tool."
-                        ),
-                    )),
-                    QueryEngineTool(
-                    query_engine=image_index,
-                    metadata=ToolMetadata(
-                        name="table_tool",
-                        description=(
-                            "Useful for any requests that require a table"
-                        ),
                     ))]
             else:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
                 company_query_engine = company.as_query_engine(
                     similarity_top_k=5)
-                summary_query_engine = summary.as_query_engine()
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
@@ -831,24 +514,6 @@ async def bot(history, messages_history):
                     metadata=ToolMetadata(
                         name='company_index',
                         description=f'{company_description}'
-                    )),
-                    QueryEngineTool(
-                    query_engine=summary_query_engine,
-                    metadata=ToolMetadata(
-                        name="summary_tool",
-                        description=(
-                            "Useful for any requests that require a holistic summary"
-                            f" of EVERYTHING. For questions about"
-                            " more specific sections, please use the vector_tool."
-                        ),
-                    )),
-                    QueryEngineTool(
-                    query_engine=image_index,
-                    metadata=ToolMetadata(
-                        name="table_tool",
-                        description=(
-                            "Useful for any requests that require a table"
-                        ),
                     ))]
             agent = OpenAIAgent.from_tools(
                 tools, verbose=True, prompt=custom_prompt)
@@ -894,66 +559,27 @@ async def bot(history, messages_history):
             elif tender is None:
                 company_query_engine = company.as_query_engine(
                     similarity_top_k=5)
-                summary_query_engine = summary.as_query_engine()
                 tools = [
                     QueryEngineTool(
                         query_engine=company_query_engine,
                         metadata=ToolMetadata(
                             name='company_index',
                             description=f'{company_description}'
-                        )),
-                    QueryEngineTool(
-                        query_engine=summary_query_engine,
-                        metadata=ToolMetadata(
-                            name="summary_tool",
-                            description=(
-                                "Useful for any requests that require a holistic summary"
-                                f" of EVERYTHING. For questions about"
-                                " more specific sections, please use the vector_tool."
-                            ),
-                        )),
-                    QueryEngineTool(
-                    query_engine=image_index,
-                    metadata=ToolMetadata(
-                        name="table_tool",
-                        description=(
-                            "Useful for any requests that require a table"
-                        ),
-                    ))]
+                        ))]
             elif company is None:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
-                summary_query_engine = summary.as_query_engine()
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
                         name='tender_index',
                         description=f'{tender_description}'
-                    )),
-                    QueryEngineTool(
-                    query_engine=summary_query_engine,
-                    metadata=ToolMetadata(
-                        name="summary_tool",
-                        description=(
-                            "Useful for any requests that require a holistic summary"
-                            f" of EVERYTHING. For questions about"
-                            " more specific sections, please use the vector_tool."
-                        ),
-                    )),
-                    QueryEngineTool(
-                    query_engine=image_index,
-                    metadata=ToolMetadata(
-                        name="table_tool",
-                        description=(
-                            "Useful for any requests that require a table"
-                        ),
                     ))]
             else:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
                 company_query_engine = company.as_query_engine(
                     similarity_top_k=5)
-                summary_query_engine = summary.as_query_engine()
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
@@ -965,24 +591,6 @@ async def bot(history, messages_history):
                     metadata=ToolMetadata(
                         name='company_index',
                         description=f'{company_description}'
-                    )),
-                    QueryEngineTool(
-                    query_engine=summary_query_engine,
-                    metadata=ToolMetadata(
-                        name="summary_tool",
-                        description=(
-                            "Useful for any requests that require a holistic summary"
-                            f" of EVERYTHING. For questions about"
-                            " more specific sections, please use the vector_tool."
-                        ),
-                    )),
-                    QueryEngineTool(
-                    query_engine=image_index,
-                    metadata=ToolMetadata(
-                        name="table_tool",
-                        description=(
-                            "Useful for any requests that require a table"
-                        ),
                     ))]
             google_spec = GoogleSearchToolSpec(
                 key=google_api_key, engine=google_engine_id, siteSearch=google_upload_url)
@@ -990,7 +598,7 @@ async def bot(history, messages_history):
                 google_spec.to_tool_list()[0]
             ).to_tool_list()
             agent = OpenAIAgent.from_tools(
-                [*tools, *google_tools], tool_retriever=obj_index.as_retriever(similarity_top_k=3), verbose=True, prompt=custom_prompt)
+                [*tools, *google_tools], verbose=True, prompt=custom_prompt)
             if history_message:
                 # qa_message=f"Devi rispondere in italiano."
                 # history_message.append({"role": "user", "content": qa_message})
@@ -1074,7 +682,31 @@ def update_source_info():
             source_info += f"File Name: {file_name}\n, Page Label: {page_label}\n\n"
 
         return source_info
-
+    
+def update_url_info():
+    global google_source_urls
+    global google_upload_url
+    directory_path = f"data/url/{current_session_id}"
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+    google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
+                       'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
+    file_list = os.listdir(directory_path)
+    for file_name in file_list:
+        file_path = os.path.join(directory_path, file_name)
+        # Check if the item in the directory is a file (not a subdirectory)
+        if os.path.isfile(file_path):
+            with open(file_path, 'r') as file:
+                file_content = file.read()
+                google_source_urls = []
+                value = file_content.strip().split('\n')
+                value = value[:10]
+                for val in value:
+                    google_upload_url += f"siteSearch={val}&"
+                if len(value) < 10:
+                    value.extend(['No data'] * (10 - len(value)))
+                # temp_arr.append(['question']+value)
+                google_source_urls.append(['question']+value)
 
 def update_source():
     global response_sources
@@ -1145,9 +777,9 @@ def delete_index(index_key):
     if openai.api_key:
         gr.Info("Deleting index..")
         global status
-        directory_path = f"./storage/{index_key}"
-        backup_path = f"./backup_path/{index_key}"
-        documents_path = f"data/{index_key}"
+        directory_path = f"./storage/{index_key}/{current_session_id}"
+        backup_path = f"./backup_path/{index_key}/{current_session_id}"
+        documents_path = f"data/{index_key}/{current_session_id}"
         # remove the directory and its contents
         if not os.path.exists(directory_path):
             os.makedirs(directory_path)
@@ -1178,10 +810,10 @@ def delete_row(index_key, file_name):
     current_datetime = datetime.now().timestamp()
     if openai.api_key:
         gr.Info("Deleting index..")
-        backup_path = f"./backup_path/{index_key}/{current_datetime}"
-        index_path = f"./storage/{index_key}"
-        documents_path = f"./data/{index_key}/{file_name}"
-        directory_path = f"data/{index_key}"
+        backup_path = f"./backup_path/{index_key}/{current_session_id}/{current_datetime}"
+        index_path = f"./storage/{current_session_id}/{index_key}"
+        documents_path = f"./data/{index_key}/{current_session_id}/{file_name}"
+        directory_path = f"data/{index_key}/{current_session_id}"
         if not os.path.exists(documents_path):
             os.makedirs(documents_path)
         if not os.path.exists(backup_path):
@@ -1191,7 +823,7 @@ def delete_row(index_key, file_name):
         shutil.move(documents_path, backup_path)
         shutil.rmtree(index_path)
 
-        string_to_match = f'data\\{index_key}\\{file_name}'
+        string_to_match = f'data\\{index_key}\\{current_session_id}\\{file_name}'
         filtered_list = [item for item in doc_ids[index_key]
                          if item.startswith(string_to_match)]
         for item in filtered_list:
@@ -1234,6 +866,13 @@ def set_openai_api_key(api_key: str):
             llm_predictor=llm_predictor, chunk_size=1024)
     else:
         gr.Warning("Please enter a valid OpenAI API key or set the env key.")
+    # ragatouille_pack = RAGatouilleRetrieverPack(
+    #     docs, # List[Document]
+    #     llm=OpenAI(model="gpt-3.5-turbo"),
+    #     index_name="my_index",
+    #     top_k=5
+    # )
+
 
 
 def openai_agent(prompt):
@@ -1248,20 +887,20 @@ def openai_agent(prompt):
 
 def update_company_info(upload_file):
 
-    file_value = get_company_files_inform(directory_path=f"data/company")
+    file_value = get_company_files_inform(directory_path=f"data/company/{current_session_id}")
     return gr.update(value=file_value)
 
 
 def update_tender_info(upload_file):
 
-    file_value = get_tender_files_inform(directory_path=f"data/tender")
+    file_value = get_tender_files_inform(directory_path=f"data/tender/{current_session_id}")
     return gr.update(value=file_value)
 
 
 def set_tender_pdf(evt: gr.SelectData):
     select_data = evt.index
     if select_data[1] == 0:
-        pdf_viewer_content = f'<iframe src="file/data/tender/{evt.value}" width="100%" height="600px"></iframe>'
+        pdf_viewer_content = f'<iframe src="file/data/tender/{current_session_id}/{evt.value}" width="100%" height="600px"></iframe>'
         file_path = search_files_by_name("./data", evt.value)
         webbrowser.open(file_path)
         return gr.update(value=pdf_viewer_content)
@@ -1272,7 +911,7 @@ def set_tender_pdf(evt: gr.SelectData):
 def set_company_pdf(evt: gr.SelectData):
     select_data = evt.index
     if select_data[1] == 0:
-        pdf_viewer_content = f'<iframe src="file/data/company/{evt.value}" width="100%" height="600px"></iframe>'
+        pdf_viewer_content = f'<iframe src="file/data/company/{current_session_id}/{evt.value}" width="100%" height="600px"></iframe>'
         file_path = search_files_by_name("./data", evt.value)
         webbrowser.open(file_path)
         return gr.update(value=pdf_viewer_content)
@@ -1349,6 +988,7 @@ def set_session(evt: gr.SelectData):
     global current_session_id
     select_data = evt.index
     current_session_id = session_list[int(select_data[0])]
+    
 # _________________________________________________________________#
 # Define the Gradio interface
 
@@ -1440,7 +1080,7 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                 #                             info="Only Document > No Documents > Documents and Search",
                 #                             interactive=True)
                 chatting_mode_radio = gr.Radio(
-                    value="Only Document", choices=["Only Document", "No Documents", "Documents and Search"], label="Chatting Quality > Agent Type"
+                    value="Documents and Search", choices=["Only Document", "No Documents", "Documents and Search"], label="Chatting Quality > Agent Type"
                 )
                 # gr.HTML(value=f"<div style='display:inline'><span style='position: absolute;left: 0px;'>Low</span><span style='position: absolute;right: 0px;'>High</span></div>")
                 custom_prompt = gr.Textbox(
@@ -1480,9 +1120,9 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
 
                 with gr.Row():
                     tender_data = get_tender_files_inform(
-                        directory_path=f"data/tender")
+                        directory_path=f"data/tender/{current_session_id}")
                     company_data = get_company_files_inform(
-                        directory_path=f"data/company")
+                        directory_path=f"data/company/{current_session_id}")
 
                     tender_dataframe = gr.Dataframe(value=tender_data,
                                                     headers=[
@@ -1599,7 +1239,10 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
         lambda: gr.update(value=get_chat_history()), None, outputs=[chatbot]).then(
         lambda: gr.update(value=update_source()), None, outputs=source_dataframe).then(
             update_source_info, None, outputs=sources).then(
-        lambda: gr.update(value=google_source_urls), None, outputs=google_search_dataframe)
+            update_url_info, None, outputs=google_search_dataframe).then(
+        lambda: gr.update(value=google_source_urls), None, outputs=google_search_dataframe).then(
+            update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe).then(
+            update_company_info, inputs=[company_dataframe], outputs=company_dataframe)
 
     session_list_dataframe.input(update_session, inputs=[
                                  session_list_dataframe])
