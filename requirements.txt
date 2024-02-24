@@ -11,3 +11,4 @@ nltk
 transformers
 ragatouille == 0.0.1a0
 bs4
+srsly
