@@ -1,17 +1,14 @@
 import webbrowser
 from dotenv import load_dotenv
 from datetime import datetime
-import pandas as pd
-from llama_index.query_engine import SubQuestionQueryEngine
-from llama_index.response.schema import StreamingResponse
 import gradio as gr
 import sys
 import os
 import openai
 import logging
-from llama_index.prompts import Prompt
 import shutil
 import sqlite3
+from llama_index.prompts import Prompt
 from llama_index import (
     VectorStoreIndex,
     SimpleDirectoryReader,
@@ -32,13 +29,13 @@ import psutil
 sys.path.append('./llama_hub/tools/google_search/')
 from base import GoogleSearchToolSpec
 
-# from llama_index.llama_pack import download_llama_pack
+from llama_index.llama_pack import download_llama_pack
 
-# # download and install dependencies
-# RAGatouilleRetrieverPack = download_llama_pack(
-#   "RAGatouilleRetrieverPack", "./ragatouille_pack"
-# )
-
+# Download and install dependencies
+RAGatouilleRetrieverPack = download_llama_pack(
+    "RAGatouilleRetrieverPack", "./ragatouille_pack"
+)
+print(RAGatouilleRetrieverPack)
 # Load environment variables from .env file
 load_dotenv()
 
@@ -159,7 +156,10 @@ def set_description(name, tool_description: str):
 response_sources = ""
 # Set model
 model = gr.State('')
-model = "gpt-4-1106-preview"
+model = "gpt-4-turbo"
+# Set colbert
+colbert = gr.State('')
+colbert = "No"
 openai.api_key = os.getenv("openai_key")
 service_context = gr.State('')
 indices = {}
@@ -173,6 +173,8 @@ file_company_inform_datas = []
 current_session_id = ''
 session_list = []
 doc_ids = {"company": [], "tender": []}
+documents = []
+ragatouille_pack = gr.State('')
 company_doc_ids = []
 tender_doc_ids = []
 google_upload_url = ''
@@ -184,9 +186,27 @@ def set_chatting_mode(value):
     global chatting_mode_status
     chatting_mode_status = value
 
+# Set model
+def set_model(_model):
+    if _model == 'gpt-4-turbo':
+        _model = 'gpt-4-1106-preview'
+    global model
+    model = _model
+
+def set_colbert(_colbert):
+    global colbert
+    colbert = _colbert
+    initRAGatouille()
 
 set_chatting_mode("Only Document")
+set_model('gpt-4-turbo')
 
+ragatouille_pack = RAGatouilleRetrieverPack(
+    documents,
+    llm=OpenAI(model=model),
+    index_name="my_index",
+    top_k=5
+)
 
 def getSessionList():
     global current_session_id
@@ -326,8 +346,27 @@ def load_or_update_index(directory, index_key):
         status += f"Index for {index_key} already up-to-date. No action taken.\n"
     return indices[index_key]
 
-# Modified upload_file function to handle index_key
-
+def initRAGatouille():
+    global documents
+    directory_tender_path = f"data/tender/{current_session_id}"
+    directory_company_path = f"data/company/{current_session_id}"
+    
+    if not os.path.isdir(directory_tender_path):
+        raise FileNotFoundError(f"Directory '{directory_tender_path}' not found")
+    
+    documents = []
+    for filename in os.listdir(directory_tender_path):
+        file_path = os.path.join(directory_tender_path, filename)
+        doc = SimpleDirectoryReader(file_path, filename_as_id=True).load_data()
+        documents.append(doc)
+        
+    if not os.path.isdir(directory_company_path):
+        raise FileNotFoundError(f"Directory '{directory_company_path}' not found")
+    
+    for filename in os.listdir(directory_company_path):
+        file_path = os.path.join(directory_company_path, filename)
+        doc = SimpleDirectoryReader(file_path, filename_as_id=True).load_data()
+        documents.append(doc)
 
 def upload_file(files, index_key):
     global index_needs_update
@@ -522,7 +561,12 @@ async def bot(history, messages_history):
                 # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
             qa_message = f"{message}.Devi rispondere in italiano."
-            response = agent.stream_chat(qa_message)
+
+            if colbert == 'No':
+                response = agent.stream_chat(qa_message)
+            else:
+                response = ragatouille_pack.run(qa_message)
+
             # content_list = [item.content for item in response.sources]
             # print(content_list)
 
@@ -841,13 +885,6 @@ def delete_row(index_key, file_name):
         return debug_info
     else:
         return None
-# Set model
-
-
-def set_model(_model):
-    global model
-    model = _model
-
 
 def get_sources(choice):
     if choice == "view source":
@@ -866,14 +903,6 @@ def set_openai_api_key(api_key: str):
             llm_predictor=llm_predictor, chunk_size=1024)
     else:
         gr.Warning("Please enter a valid OpenAI API key or set the env key.")
-    # ragatouille_pack = RAGatouilleRetrieverPack(
-    #     docs, # List[Document]
-    #     llm=OpenAI(model="gpt-3.5-turbo"),
-    #     index_name="my_index",
-    #     top_k=5
-    # )
-
-
 
 def openai_agent(prompt):
     response = openai.chat.completions.create(
@@ -1113,10 +1142,16 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                     "company_description", x), inputs=company_description_textbox)
 
                 radio = gr.Radio(
-                    value="gpt-4-1106-preview", choices=["gpt-3.5-turbo", "gpt-4-1106-preview"], label="Models"
+                    value="gpt-4-turbo", choices=["gpt-3.5-turbo", "gpt-4-turbo"], label="Models"
                 )
 
                 radio.change(set_model, inputs=radio)
+
+                radioColBERT = gr.Radio(
+                    value="No", choices=["Yes", "No"], label="ColBERT"
+                )
+
+                radioColBERT.change(set_colbert, inputs=radioColBERT) 
 
                 with gr.Row():
                     tender_data = get_tender_files_inform(
