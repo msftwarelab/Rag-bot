@@ -1,20 +1,13 @@
 openai == 1.3.5
-llama-index == 0.9.6
+llama-index == 0.9.45
 gradio == 4.7.1
 llama-hub == 0.0.47
 langchain == 0.0.340
-torch
-pypdf == 3.17.1
-PyPDF2==2.12.1
+pypdf
 docx2txt
 PyMuPDF 
 python-dotenv
 nltk
-git+https://github.com/nielsrogge/transformers.git@convert_table_transformer_new_checkpoints
-easyocr
-matplotlib
-Pillow
-pandas
-docx2txt
-camelot-py[cv]
-faiss-cpu
+transformers
+ragatouille == 0.0.1a0
+bs4
