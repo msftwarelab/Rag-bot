@@ -28,14 +28,14 @@ import sys
 import psutil
 sys.path.append('./llama_hub/tools/google_search/')
 from base import GoogleSearchToolSpec
-
+from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
 from llama_index.llama_pack import download_llama_pack
 
 # Download and install dependencies
-RAGatouilleRetrieverPack = download_llama_pack(
-    "RAGatouilleRetrieverPack", "./ragatouille_pack"
-)
-print(RAGatouilleRetrieverPack)
+# RAGatouilleRetrieverPack = download_llama_pack(
+#     "RAGatouilleRetrieverPack", "./ragatouille_pack"
+# )
+# print(RAGatouilleRetrieverPack)
 # Load environment variables from .env file
 load_dotenv()
 
