@@ -201,13 +201,6 @@ def set_colbert(_colbert):
 set_chatting_mode("Only Document")
 set_model('gpt-4-turbo')
 
-ragatouille_pack = RAGatouilleRetrieverPack(
-    documents,
-    llm=OpenAI(model=model),
-    index_name="my_index",
-    top_k=5
-)
-
 def getSessionList():
     global current_session_id
     global session_list
@@ -491,6 +484,12 @@ async def bot(history, messages_history):
         global indices
         global google_source_urls
         global google_upload_url
+        ragatouille_pack = RAGatouilleRetrieverPack(
+            documents,
+            llm=OpenAI(model=model),
+            index_name="my_index",
+            top_k=5
+        )
         if openai.api_key == "":
             gr.Warning("Invalid OpenAI API key.")
             raise ValueError("Invalid OpenAI API key.")
