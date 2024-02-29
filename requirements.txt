@@ -9,6 +9,6 @@ PyMuPDF
 python-dotenv
 nltk
 transformers
-ragatouille == 0.0.1a0
+ragatouille == 0.0.7.post9
 bs4
 srsly

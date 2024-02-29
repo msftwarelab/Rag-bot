@@ -1,17 +1,15 @@
 """RAGatouille Retriever Pack."""
 
-
 from typing import Any, Dict, List, Optional
 
-from llama_index.schema import Document, NodeWithScore, TextNode
-
-from llama_index.llama_pack.base import BaseLlamaPack
-from llama_index.llms import OpenAI
-from llama_index.llms.llm import LLM
-from llama_index.query_engine import RetrieverQueryEngine
-from llama_index.retrievers import BaseRetriever
-from llama_index.service_context import ServiceContext
-from llama_index.indices.query.schema import QueryBundle
+from llama_index.core.base.base_retriever import BaseRetriever
+from llama_index.core.indices.query.schema import QueryBundle
+from llama_index.core.llama_pack.base import BaseLlamaPack
+from llama_index.core.llms.llm import LLM
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.schema import Document, NodeWithScore, TextNode
+from llama_index.core.service_context import ServiceContext
+from llama_index.llms.openai import OpenAI
 
 
 class CustomRetriever(BaseRetriever):
@@ -98,7 +96,6 @@ class RAGatouilleRetrieverPack(BaseLlamaPack):
 
     def add_documents(self, documents: List[Document]) -> None:
         """Add documents."""
-
         doc_txts = [doc.get_content() for doc in documents]
         doc_ids = [doc.doc_id for doc in documents]
         doc_metadatas = [doc.metadata for doc in documents]
@@ -111,7 +108,6 @@ class RAGatouilleRetrieverPack(BaseLlamaPack):
 
     def delete_documents(self, documents: List[Document]) -> None:
         """Delete documents."""
-
         doc_ids = [doc.doc_id for doc in documents]
 
         self.RAG.delete_from_index(document_ids=doc_ids)

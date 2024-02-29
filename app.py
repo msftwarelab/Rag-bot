@@ -18,11 +18,12 @@ from llama_index import (
 from llama_index import ServiceContext
 from llama_index.storage.storage_context import StorageContext
 from langchain.chat_models import ChatOpenAI
+# from langchain_community.chat_models import ChatOpenAI
 from llama_index.llms import OpenAI
 from llama_index.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms import ChatMessage
 from llama_index.agent import OpenAIAgent, ContextRetrieverOpenAIAgent
-from langchain.embeddings import OpenAIEmbeddings
+# from langchain.embeddings import OpenAIEmbeddings
 from llama_index.tools.tool_spec.load_and_search.base import LoadAndSearchToolSpec
 import sys
 import psutil
@@ -484,6 +485,7 @@ async def bot(history, messages_history):
         global indices
         global google_source_urls
         global google_upload_url
+
         ragatouille_pack = RAGatouilleRetrieverPack(
             documents,
             llm=OpenAI(model=model),
@@ -647,7 +649,11 @@ async def bot(history, messages_history):
                 # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
             qa_message = f"{message}.Devi rispondere in italiano."
-            response = agent.stream_chat(qa_message)
+            if colbert == 'No':
+                response = agent.stream_chat(qa_message)
+            else:
+                response = ragatouille_pack.run(qa_message)
+            # response = agent.stream_chat(qa_message)
             source_urls = google_spec.get_source_url(qa_message)
             stream_token = ""
             if response.source_nodes == []:
