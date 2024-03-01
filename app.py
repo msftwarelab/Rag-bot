@@ -18,6 +18,7 @@ from llama_index import (
 from llama_index import ServiceContext
 from llama_index.storage.storage_context import StorageContext
 from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from llama_index.llms import OpenAI
 from llama_index.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms import ChatMessage
@@ -35,7 +36,6 @@ from llama_index.llama_pack import download_llama_pack
 # RAGatouilleRetrieverPack = download_llama_pack(
 #     "RAGatouilleRetrieverPack", "./ragatouille_pack"
 # )
-# print(RAGatouilleRetrieverPack)
 # Load environment variables from .env file
 load_dotenv()
 
@@ -181,6 +181,12 @@ google_upload_url = ''
 google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
                        'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
 
+ragatouille_pack = RAGatouilleRetrieverPack(
+    documents,
+    llm=OpenAI(model='gpt-4-1106-preview'),
+    index_name="my_index",
+    top_k=5
+)
 
 def set_chatting_mode(value):
     global chatting_mode_status
@@ -485,12 +491,6 @@ async def bot(history, messages_history):
         global google_source_urls
         global google_upload_url
 
-        ragatouille_pack = RAGatouilleRetrieverPack(
-            documents,
-            llm=OpenAI(model=model),
-            index_name="my_index",
-            top_k=5
-        )
         if openai.api_key == "":
             gr.Warning("Invalid OpenAI API key.")
             raise ValueError("Invalid OpenAI API key.")
