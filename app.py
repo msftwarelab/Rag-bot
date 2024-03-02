@@ -339,8 +339,8 @@ def load_or_update_index(directory, index_key):
     return indices[index_key]
 
 def initRAGatouille():
-    print("========================================> call initRAGatouille: ", documents)
     global documents
+    print("========================================> call initRAGatouille: ", documents)
     directory_tender_path = f"data/tender/{current_session_id}"
     directory_company_path = f"data/company/{current_session_id}"
     
