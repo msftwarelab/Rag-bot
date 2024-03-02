@@ -194,6 +194,7 @@ def set_model(_model):
 def set_colbert(_colbert):
     global colbert
     colbert = _colbert
+    print("========================================> initRAGatouille: ", documents)
     initRAGatouille()
 
 set_chatting_mode("Only Document")
@@ -338,6 +339,7 @@ def load_or_update_index(directory, index_key):
     return indices[index_key]
 
 def initRAGatouille():
+    print("========================================> call initRAGatouille: ", documents)
     global documents
     directory_tender_path = f"data/tender/{current_session_id}"
     directory_company_path = f"data/company/{current_session_id}"
@@ -358,6 +360,8 @@ def initRAGatouille():
         file_path = os.path.join(directory_company_path, filename)
         doc = SimpleDirectoryReader(file_path, filename_as_id=True).load_data()
         documents.append(doc)
+
+    print("========================================> finish initRAGatouille: ", documents)
 
 def upload_file(files, index_key):
     global index_needs_update
