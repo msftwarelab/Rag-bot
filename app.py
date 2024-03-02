@@ -180,13 +180,6 @@ google_upload_url = ''
 google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
                        'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
 
-ragatouille_pack = RAGatouilleRetrieverPack(
-    documents,
-    llm=OpenAI(model='gpt-4-1106-preview'),
-    index_name="my_index",
-    top_k=5
-)
-
 def set_chatting_mode(value):
     global chatting_mode_status
     chatting_mode_status = value
@@ -489,6 +482,15 @@ async def bot(history, messages_history):
         global indices
         global google_source_urls
         global google_upload_url
+
+        print("===> documents: ", documents)
+
+        ragatouille_pack = RAGatouilleRetrieverPack(
+            documents,
+            llm=OpenAI(model='gpt-4-1106-preview'),
+            index_name="my_index",
+            top_k=5
+        )
 
         if openai.api_key == "":
             gr.Warning("Invalid OpenAI API key.")
