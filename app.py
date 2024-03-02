@@ -194,7 +194,6 @@ def set_model(_model):
 def set_colbert(_colbert):
     global colbert
     colbert = _colbert
-    print("========================================> initRAGatouille: ", documents)
     initRAGatouille()
 
 set_chatting_mode("Only Document")
@@ -554,7 +553,6 @@ async def bot(history, messages_history):
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
             else:
-                print("===> documents: ", documents)
                 ragatouille_pack = RAGatouilleRetrieverPack(
                     documents,
                     llm=OpenAI(model='gpt-4-1106-preview'),
@@ -562,6 +560,7 @@ async def bot(history, messages_history):
                     top_k=5
                 )
                 response = ragatouille_pack.run(qa_message)
+                print("=================================================================> response: ", response)
 
             # content_list = [item.content for item in response.sources]
             # print(content_list)
