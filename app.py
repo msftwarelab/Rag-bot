@@ -340,29 +340,21 @@ def load_or_update_index(directory, index_key):
 
 def initRAGatouille():
     global documents
-    print("========================================> call initRAGatouille: ", documents)
-    directory_tender_path = f"data/tender/{current_session_id}"
-    directory_company_path = f"data/company/{current_session_id}"
-    
     documents = []
 
-    if os.path.isdir(directory_tender_path):
-        for filename in os.listdir(directory_tender_path):
-            file_path = os.path.join(directory_tender_path, filename)
-            doc = SimpleDirectoryReader(file_path, filename_as_id=True).load_data()
-            documents.append(doc)
-    else:
-        print(f"Warning: Directory '{directory_tender_path}' not found")
-        
-    if os.path.isdir(directory_company_path):
-        for filename in os.listdir(directory_company_path):
-            file_path = os.path.join(directory_company_path, filename)
-            doc = SimpleDirectoryReader(file_path, filename_as_id=True).load_data()
-            documents.append(doc)
-    else:
-        print(f"Warning: Directory '{directory_company_path}' not found")
+    directory_paths = [os.path.normpath(f"data/tender/{current_session_id}"), os.path.normpath(f"data/company/{current_session_id}")]
 
-    print("========================================> finish initRAGatouille: ", documents)
+    for directory_path in directory_paths:
+        if os.path.isdir(directory_path):
+            # If you intend to process all files within this directory with SimpleDirectoryReader
+            # Assuming SimpleDirectoryReader can process a directory containing files
+            try:
+                docs = SimpleDirectoryReader(directory_path, filename_as_id=True).load_data()
+                documents.extend(docs)  # Assuming load_data() returns a list or iterable
+            except Exception as e:
+                print(f"Error processing directory {directory_path}: {e}")
+        else:
+            print(f"Warning: Directory '{directory_path}' not found")
 
 def upload_file(files, index_key):
     global index_needs_update
@@ -734,7 +726,7 @@ def update_source_info():
             source_info += f"File Name: {file_name}\n, Page Label: {page_label}\n\n"
 
         return source_info
-    
+
 def update_url_info():
     global google_source_urls
     global google_upload_url
@@ -1025,7 +1017,7 @@ def set_session(evt: gr.SelectData):
     global current_session_id
     select_data = evt.index
     current_session_id = session_list[int(select_data[0])]
-    
+
 # _________________________________________________________________#
 # Define the Gradio interface
 
@@ -1049,7 +1041,7 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
     session_state = gr.State([])
     def user(user_message, history):
         return "", history + [[user_message, None]]
-    
+
     with gr.Row():
         with gr.Column(scale=1, min_width=200):
             session_title = gr.Textbox(label="Session Title")
