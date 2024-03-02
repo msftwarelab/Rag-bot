@@ -18,7 +18,6 @@ from llama_index import (
 from llama_index import ServiceContext
 from llama_index.storage.storage_context import StorageContext
 from langchain_community.chat_models import ChatOpenAI
-from langchain_openai import ChatOpenAI
 from llama_index.llms import OpenAI
 from llama_index.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms import ChatMessage
