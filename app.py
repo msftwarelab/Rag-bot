@@ -344,22 +344,23 @@ def initRAGatouille():
     directory_tender_path = f"data/tender/{current_session_id}"
     directory_company_path = f"data/company/{current_session_id}"
     
-    if not os.path.isdir(directory_tender_path):
-        raise FileNotFoundError(f"Directory '{directory_tender_path}' not found")
-    
     documents = []
-    for filename in os.listdir(directory_tender_path):
-        file_path = os.path.join(directory_tender_path, filename)
-        doc = SimpleDirectoryReader(file_path, filename_as_id=True).load_data()
-        documents.append(doc)
+
+    if os.path.isdir(directory_tender_path):
+        for filename in os.listdir(directory_tender_path):
+            file_path = os.path.join(directory_tender_path, filename)
+            doc = SimpleDirectoryReader(file_path, filename_as_id=True).load_data()
+            documents.append(doc)
+    else:
+        print(f"Warning: Directory '{directory_tender_path}' not found")
         
-    if not os.path.isdir(directory_company_path):
-        raise FileNotFoundError(f"Directory '{directory_company_path}' not found")
-    
-    for filename in os.listdir(directory_company_path):
-        file_path = os.path.join(directory_company_path, filename)
-        doc = SimpleDirectoryReader(file_path, filename_as_id=True).load_data()
-        documents.append(doc)
+    if os.path.isdir(directory_company_path):
+        for filename in os.listdir(directory_company_path):
+            file_path = os.path.join(directory_company_path, filename)
+            doc = SimpleDirectoryReader(file_path, filename_as_id=True).load_data()
+            documents.append(doc)
+    else:
+        print(f"Warning: Directory '{directory_company_path}' not found")
 
     print("========================================> finish initRAGatouille: ", documents)
 
