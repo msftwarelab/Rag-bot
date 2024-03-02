@@ -483,15 +483,6 @@ async def bot(history, messages_history):
         global google_source_urls
         global google_upload_url
 
-        print("===> documents: ", documents)
-
-        ragatouille_pack = RAGatouilleRetrieverPack(
-            documents,
-            llm=OpenAI(model='gpt-4-1106-preview'),
-            index_name="my_index",
-            top_k=5
-        )
-
         if openai.api_key == "":
             gr.Warning("Invalid OpenAI API key.")
             raise ValueError("Invalid OpenAI API key.")
@@ -566,6 +557,13 @@ async def bot(history, messages_history):
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
             else:
+                print("===> documents: ", documents)
+                ragatouille_pack = RAGatouilleRetrieverPack(
+                    documents,
+                    llm=OpenAI(model='gpt-4-1106-preview'),
+                    index_name="my_index",
+                    top_k=5
+                )
                 response = ragatouille_pack.run(qa_message)
 
             # content_list = [item.content for item in response.sources]
