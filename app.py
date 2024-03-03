@@ -588,6 +588,7 @@ async def bot(history, messages_history):
                     top_k=5
                 )
                 response = ragatouille_pack.run(qa_message)
+                print("================================> response: ", response)
 
                 stream_token = ""
                 for token in response:
@@ -685,6 +686,7 @@ async def bot(history, messages_history):
                     top_k=5
                 )
                 response = ragatouille_pack.run(qa_message)
+                print("================================> response: ", response)
 
                 stream_token = ""
                 for token in response:
@@ -724,7 +726,7 @@ async def bot(history, messages_history):
                     top_k=5
                 )
                 response = ragatouille_pack.run(qa_message)
-
+                print("================================> response: ", response)
                 stream_token = ""
                 for token in content:
                     stream_token += token
