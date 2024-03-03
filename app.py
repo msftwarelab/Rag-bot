@@ -552,6 +552,34 @@ async def bot(history, messages_history):
 
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
+                # content_list = [item.content for item in response.sources]
+                # print(content_list)
+
+                if response.sources:
+                    response_sources = response.source_nodes
+                    stream_token = ""
+                    for token in response.response_gen:
+                        stream_token += token
+                        yield history, messages_history
+                    if stream_token and message:
+                        write_chat_history_to_db(
+                            f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+                else:
+                    history_message = []
+                    response_sources = "No sources found."
+                    qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
+                    history_message.append({"role": "user", "content": qa_message})
+                    content = openai_agent(history_message)
+
+                    partial_message = ""
+                    for chunk in content:
+                        if chunk.choices[0].delta.content:
+                            partial_message = partial_message + \
+                                chunk.choices[0].delta.content
+                            yield history, messages_history
+                    if partial_message and message:
+                        write_chat_history_to_db(
+                            f"{message}::::{partial_message}", "no_data")
             else:
                 ragatouille_pack = RAGatouilleRetrieverPack(
                     documents,
@@ -560,36 +588,14 @@ async def bot(history, messages_history):
                     top_k=5
                 )
                 response = ragatouille_pack.run(qa_message)
-                print("=================================================================> response: ", response)
 
-            # content_list = [item.content for item in response.sources]
-            # print(content_list)
-
-            if response.sources:
-                response_sources = response.source_nodes
                 stream_token = ""
-                for token in response.response_gen:
+                for token in response:
                     stream_token += token
                     yield history, messages_history
                 if stream_token and message:
                     write_chat_history_to_db(
                         f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
-            else:
-                history_message = []
-                response_sources = "No sources found."
-                qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
-                history_message.append({"role": "user", "content": qa_message})
-                content = openai_agent(history_message)
-
-                partial_message = ""
-                for chunk in content:
-                    if chunk.choices[0].delta.content:
-                        partial_message = partial_message + \
-                            chunk.choices[0].delta.content
-                        yield history, messages_history
-                if partial_message and message:
-                    write_chat_history_to_db(
-                        f"{message}::::{partial_message}", "no_data")
 
         elif chatting_mode_status == "Documents and Search":
             if tender is None and company is None:
@@ -645,35 +651,48 @@ async def bot(history, messages_history):
             qa_message = f"{message}.Devi rispondere in italiano."
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
-            else:
-                response = ragatouille_pack.run(qa_message)
-            # response = agent.stream_chat(qa_message)
-            source_urls = google_spec.get_source_url(qa_message)
-            stream_token = ""
-            if response.source_nodes == []:
-                temp_arry = []
-                temp_arry.append(message)
-                for source_url in source_urls:
-                    temp_arry.append(source_url['link'])
-                if google_source_urls[0][0] == 'No data':
-                    google_source_urls = []
-                    google_source_urls.append(temp_arry)
+                source_urls = google_spec.get_source_url(qa_message)
+                stream_token = ""
+                if response.source_nodes == []:
+                    temp_arry = []
+                    temp_arry.append(message)
+                    for source_url in source_urls:
+                        temp_arry.append(source_url['link'])
+                    if google_source_urls[0][0] == 'No data':
+                        google_source_urls = []
+                        google_source_urls.append(temp_arry)
+                    else:
+                        google_source_urls.append(temp_arry)
+                    # print(google_source_urls)
+
+                elif response.source_nodes:
+                    response_sources = response.source_nodes
                 else:
-                    google_source_urls.append(temp_arry)
-                # print(google_source_urls)
+                    response_sources = "No sources found."
 
-            elif response.source_nodes:
-                response_sources = response.source_nodes
+                for token in response.response_gen:
+                    stream_token += token
+                    yield history, messages_history
+
+                if stream_token and message:
+                    write_chat_history_to_db(
+                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
             else:
-                response_sources = "No sources found."
+                ragatouille_pack = RAGatouilleRetrieverPack(
+                    documents,
+                    llm=OpenAI(model='gpt-4-1106-preview'),
+                    index_name="my_index",
+                    top_k=5
+                )
+                response = ragatouille_pack.run(qa_message)
 
-            for token in response.response_gen:
-                stream_token += token
-                yield history, messages_history
-
-            if stream_token and message:
-                write_chat_history_to_db(
-                    f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+                stream_token = ""
+                for token in response:
+                    stream_token += token
+                    yield history, messages_history
+                if stream_token and message:
+                    write_chat_history_to_db(
+                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
         else:
             history_message = []
             for history_data in loaded_history[-min(5, len(loaded_history)):]:
@@ -685,17 +704,34 @@ async def bot(history, messages_history):
             history_message.append({"role": "user", "content": message})
             qa_message = f"Devi rispondere in italiano."
             history_message.append({"role": "user", "content": qa_message})
-            content = openai_agent(history_message)
+            if colbert == 'No':
+                content = openai_agent(history_message)
 
-            partial_message = ""
-            for chunk in content:
-                if chunk.choices[0].delta.content:
-                    partial_message = partial_message + \
-                        chunk.choices[0].delta.content
+                partial_message = ""
+                for chunk in content:
+                    if chunk.choices[0].delta.content:
+                        partial_message = partial_message + \
+                            chunk.choices[0].delta.content
+                        yield history, messages_history
+                if partial_message and message:
+                    write_chat_history_to_db(
+                        f"{message}::::{partial_message}", "no_data")
+            else:
+                ragatouille_pack = RAGatouilleRetrieverPack(
+                    documents,
+                    llm=OpenAI(model='gpt-4-1106-preview'),
+                    index_name="my_index",
+                    top_k=5
+                )
+                response = ragatouille_pack.run(qa_message)
+
+                stream_token = ""
+                for token in content:
+                    stream_token += token
                     yield history, messages_history
-            if partial_message and message:
-                write_chat_history_to_db(
-                    f"{message}::::{partial_message}", "no_data")
+                if stream_token and message:
+                    write_chat_history_to_db(
+                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
 
     except ValueError as e:
         # Display the warning message in the Gradio interface
