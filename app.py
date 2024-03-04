@@ -589,6 +589,7 @@ async def bot(history, messages_history):
                 )
                 response = ragatouille_pack.run(qa_message)
                 print("================================> response: ", response)
+                print("Type of response:", type(response))
 
                 stream_token = ""
                 for token in response:
