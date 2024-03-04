@@ -589,10 +589,8 @@ async def bot(history, messages_history):
                 )
                 response = ragatouille_pack.run(qa_message)
                 print("================================> response: ", response.get_formatted_sources)
+                print("================================> response string: ", str(response))
                 print("================================> type of response:", type(response.get_formatted_sources))
-
-                print("================================> second response: ", response.get_formatted_sources.response)
-                print("================================> seconde type of response:", type(response.get_formatted_sources.response))
 
                 stream_token = ""
                 for token in response:
