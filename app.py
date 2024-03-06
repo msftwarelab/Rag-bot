@@ -124,8 +124,8 @@ wordlift_theme = gr.themes.Soft(
     input_background_fill="#F6F6F6",
 )
 
-template = '''Abbiamo fornito le informazioni di contesto di seguito:{context_str}
-Prendendo in considerazione queste informazioni, in qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire risposte e fonti alle seguenti domande.Devi sempre rispondere in italiano: {query_str}'''
+template = '''Per favore rispondi in italiano. Abbiamo fornito le informazioni di contesto di seguito:{context_str}
+Prendendo in considerazione queste informazioni, in qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire risposte e fonti alle seguenti domande. {query_str}'''
 
 custom_prompt = Prompt(template)
 # Set the custom prompt
@@ -548,7 +548,7 @@ async def bot(history, messages_history):
                 # qa_message=f"Devi rispondere in italiano."
                 # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
-            qa_message = f"{message}.Devi rispondere in italiano."
+            qa_message = f"{message}."
 
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
@@ -567,7 +567,7 @@ async def bot(history, messages_history):
                 else:
                     history_message = []
                     response_sources = "No sources found."
-                    qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
+                    qa_message = f"({message}).If parentheses content is about hello, you can say 'Ciao! Come posso aiutarti oggi?' but if not, you can say like 'mi spiace non ho trovato informazioni pertinenti.' but not exactly same."
                     history_message.append({"role": "user", "content": qa_message})
                     content = openai_agent(history_message)
 
@@ -648,7 +648,7 @@ async def bot(history, messages_history):
                 # qa_message=f"Devi rispondere in italiano."
                 # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
-            qa_message = f"{message}.Devi rispondere in italiano."
+            qa_message = f"{message}."
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
                 source_urls = google_spec.get_source_url(qa_message)
@@ -702,35 +702,19 @@ async def bot(history, messages_history):
                     {"role": "assistant", "content": history_data[1]})
 
             history_message.append({"role": "user", "content": message})
-            qa_message = f"Devi rispondere in italiano."
+            qa_message = f"Per favore rispondi in italiano"
             history_message.append({"role": "user", "content": qa_message})
-            if colbert == 'No':
-                content = openai_agent(history_message)
+            content = openai_agent(history_message)
 
-                partial_message = ""
-                for chunk in content:
-                    if chunk.choices[0].delta.content:
-                        partial_message = partial_message + \
-                            chunk.choices[0].delta.content
-                        yield history, messages_history
-                if partial_message and message:
-                    write_chat_history_to_db(
-                        f"{message}::::{partial_message}", "no_data")
-            else:
-                ragatouille_pack = RAGatouilleRetrieverPack(
-                    documents,
-                    llm=OpenAI(model='gpt-4-1106-preview'),
-                    index_name="my_index",
-                    top_k=5
-                )
-                response = ragatouille_pack.run(qa_message)
-                stream_token = ""
-                for token in str(response):
-                    stream_token += token
+            partial_message = ""
+            for chunk in content:
+                if chunk.choices[0].delta.content:
+                    partial_message = partial_message + \
+                        chunk.choices[0].delta.content
                     yield history, messages_history
-                if stream_token and message:
-                    write_chat_history_to_db(
-                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+            if partial_message and message:
+                write_chat_history_to_db(
+                    f"{message}::::{partial_message}", "no_data")
 
     except ValueError as e:
         # Display the warning message in the Gradio interface
