@@ -341,15 +341,13 @@ def initRAGatouille():
     global documents
     documents = []
 
-    directory_paths = [os.path.normpath(f"data/tender/{current_session_id}"), os.path.normpath(f"data/company/{current_session_id}")]
+    directory_paths = ["./data/tender/", "./data/company/"]
 
     for directory_path in directory_paths:
         if os.path.isdir(directory_path):
-            # If you intend to process all files within this directory with SimpleDirectoryReader
-            # Assuming SimpleDirectoryReader can process a directory containing files
             try:
                 docs = SimpleDirectoryReader(directory_path, filename_as_id=True).load_data()
-                documents.extend(docs)  # Assuming load_data() returns a list or iterable
+                documents.extend(docs)
             except Exception as e:
                 print(f"Error processing directory {directory_path}: {e}")
         else:
