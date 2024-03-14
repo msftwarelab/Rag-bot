@@ -550,6 +550,7 @@ async def bot(history, messages_history):
                 agent.memory.set(history_message)
             qa_message = f"{message}."
 
+            print(f"==========================> Colbert value before check: {colbert}")
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
                 # content_list = [item.content for item in response.sources]
@@ -581,22 +582,21 @@ async def bot(history, messages_history):
                         write_chat_history_to_db(
                             f"{message}::::{partial_message}", "no_data")
             else:
-                if documents is not None:
-                    ragatouille_pack = RAGatouilleRetrieverPack(
-                        documents,
-                        llm=OpenAI(model='gpt-4-1106-preview'),
-                        index_name="my_index",
-                        top_k=5
-                    )
-                    response = ragatouille_pack.run(qa_message)
+                ragatouille_pack = RAGatouilleRetrieverPack(
+                    documents,
+                    llm=OpenAI(model='gpt-4-1106-preview'),
+                    index_name="my_index",
+                    top_k=5
+                )
+                response = ragatouille_pack.run(qa_message)
 
-                    stream_token = ""
-                    for token in str(response):
-                        stream_token += token
-                        yield history, messages_history
-                    if stream_token and message:
-                        write_chat_history_to_db(
-                            f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+                stream_token = ""
+                for token in str(response):
+                    stream_token += token
+                    yield history, messages_history
+                if stream_token and message:
+                    write_chat_history_to_db(
+                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
 
         elif chatting_mode_status == "Documents and Search":
             if tender is None and company is None:
@@ -650,6 +650,7 @@ async def bot(history, messages_history):
                 # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
             qa_message = f"{message}."
+            print(f"========================> Colbert value before check: {colbert}")
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
                 source_urls = google_spec.get_source_url(qa_message)
@@ -679,22 +680,21 @@ async def bot(history, messages_history):
                     write_chat_history_to_db(
                         f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
             else:
-                if documents is not None:
-                    ragatouille_pack = RAGatouilleRetrieverPack(
-                        documents,
-                        llm=OpenAI(model='gpt-4-1106-preview'),
-                        index_name="my_index",
-                        top_k=5
-                    )
-                    response = ragatouille_pack.run(qa_message)
+                ragatouille_pack = RAGatouilleRetrieverPack(
+                    documents,
+                    llm=OpenAI(model='gpt-4-1106-preview'),
+                    index_name="my_index",
+                    top_k=5
+                )
+                response = ragatouille_pack.run(qa_message)
 
-                    stream_token = ""
-                    for token in str(response):
-                        stream_token += token
-                        yield history, messages_history
-                    if stream_token and message:
-                        write_chat_history_to_db(
-                            f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+                stream_token = ""
+                for token in str(response):
+                    stream_token += token
+                    yield history, messages_history
+                if stream_token and message:
+                    write_chat_history_to_db(
+                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
         else:
             history_message = []
             for history_data in loaded_history[-min(5, len(loaded_history)):]:
