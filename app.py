@@ -124,8 +124,8 @@ wordlift_theme = gr.themes.Soft(
     input_background_fill="#F6F6F6",
 )
 
-template = '''Per favore rispondi in italiano. Abbiamo fornito le informazioni di contesto di seguito:{context_str}
-Prendendo in considerazione queste informazioni, in qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire risposte e fonti alle seguenti domande. {query_str}'''
+template = '''Abbiamo fornito le informazioni di contesto di seguito:{context_str}
+Prendendo in considerazione queste informazioni, in qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire risposte e fonti alle seguenti domande.Devi sempre rispondere in italiano: {query_str}'''
 
 custom_prompt = Prompt(template)
 # Set the custom prompt
@@ -546,8 +546,7 @@ async def bot(history, messages_history):
                 # qa_message=f"Devi rispondere in italiano."
                 # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
-            qa_message = f"{message}."
-
+            qa_message = f"{message}.Devi rispondere in italiano."
             print(f"==========================> Colbert value before check: {colbert}")
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
@@ -566,7 +565,7 @@ async def bot(history, messages_history):
                 else:
                     history_message = []
                     response_sources = "No sources found."
-                    qa_message = f"({message}).If parentheses content is about hello, you can say 'Ciao! Come posso aiutarti oggi?' but if not, you can say like 'mi spiace non ho trovato informazioni pertinenti.' but not exactly same."
+                    qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
                     history_message.append({"role": "user", "content": qa_message})
                     content = openai_agent(history_message)
 
@@ -647,7 +646,7 @@ async def bot(history, messages_history):
                 # qa_message=f"Devi rispondere in italiano."
                 # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
-            qa_message = f"{message}."
+            qa_message = f"{message}.Devi rispondere in italiano."
             print(f"========================> Colbert value before check: {colbert}")
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
@@ -702,7 +701,7 @@ async def bot(history, messages_history):
                     {"role": "assistant", "content": history_data[1]})
 
             history_message.append({"role": "user", "content": message})
-            qa_message = f"Per favore rispondi in italiano"
+            qa_message = f"Devi rispondere in italiano."
             history_message.append({"role": "user", "content": qa_message})
             content = openai_agent(history_message)
 
@@ -744,7 +743,7 @@ def update_source_info():
             source_info += f"File Name: {file_name}\n, Page Label: {page_label}\n\n"
 
         return source_info
-
+    
 def update_url_info():
     global google_source_urls
     global google_upload_url
