@@ -548,6 +548,7 @@ async def bot(history, messages_history):
                 agent.memory.set(history_message)
             qa_message = f"{message}.Devi rispondere in italiano."
             print(f"==========================> Colbert value before check: {colbert}")
+            print(f"==========================> documents value before check: {documents}")
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
                 # content_list = [item.content for item in response.sources]
@@ -648,6 +649,7 @@ async def bot(history, messages_history):
                 agent.memory.set(history_message)
             qa_message = f"{message}.Devi rispondere in italiano."
             print(f"========================> Colbert value before check: {colbert}")
+            print(f"========================> documents value before check: {documents}")
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
                 source_urls = google_spec.get_source_url(qa_message)
