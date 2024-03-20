@@ -341,7 +341,7 @@ def initRAGatouille():
     global documents
     documents = []
 
-    directory_paths = ["./data/tender/", "./data/company/"]
+    directory_paths = ["data/tender/", "data/company/"]
 
     for directory_path in directory_paths:
         if os.path.isdir(directory_path):
