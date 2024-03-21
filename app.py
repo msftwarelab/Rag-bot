@@ -499,101 +499,103 @@ async def bot(history, messages_history):
             yield "Index not found. Please upload the files first."
         tools = []
         message = history[-1][0]
-        # if chatting_mode_status == "Only Document":
-        #     if tender is None and company is None:
-        #         gr.Warning("Index not found. Please upload the files first.")
-        #         yield "Index not found. Please upload the files first."
+        print("=====================> company index: ", company)
+        print("=====================> tender index: ", tender)
+        if chatting_mode_status == "Only Document":
+            if tender is None and company is None:
+                gr.Warning("Index not found. Please upload the files first.")
+                yield "Index not found. Please upload the files first."
 
-        #     elif tender is None:
-        #         company_query_engine = company.as_query_engine(
-        #             similarity_top_k=5)
-        #         tools = [
-        #             QueryEngineTool(
-        #                 query_engine=company_query_engine,
-        #                 metadata=ToolMetadata(
-        #                     name='company_index',
-        #                     description=f'{company_description}'
-        #                 ))]
-        #     elif company is None:
-        #         tender_query_engine = tender.as_query_engine(
-        #             similarity_top_k=5)
-        #         tools = [QueryEngineTool(
-        #             query_engine=tender_query_engine,
-        #             metadata=ToolMetadata(
-        #                 name='tender_index',
-        #                 description=f'{tender_description}'
-        #             ))]
-        #     else:
-        #         tender_query_engine = tender.as_query_engine(
-        #             similarity_top_k=5)
-        #         company_query_engine = company.as_query_engine(
-        #             similarity_top_k=5)
-        #         tools = [QueryEngineTool(
-        #             query_engine=tender_query_engine,
-        #             metadata=ToolMetadata(
-        #                 name='tender_index',
-        #                 description=f'{tender_description}'
-        #             )),
-        #             QueryEngineTool(
-        #             query_engine=company_query_engine,
-        #             metadata=ToolMetadata(
-        #                 name='company_index',
-        #                 description=f'{company_description}'
-        #             ))]
-        #     agent = OpenAIAgent.from_tools(
-        #         tools, verbose=True, prompt=custom_prompt)
-        #     if history_message:
-        #         # qa_message=f"Devi rispondere in italiano."
-        #         # history_message.append({"role": "user", "content": qa_message})
-        #         agent.memory.set(history_message)
-        #     qa_message = f"{message}.Devi rispondere in italiano."
-        #     if colbert == 'No':
-        #         response = agent.stream_chat(qa_message)
-        #         # content_list = [item.content for item in response.sources]
-        #         # print(content_list)
+            elif tender is None:
+                company_query_engine = company.as_query_engine(
+                    similarity_top_k=5)
+                tools = [
+                    QueryEngineTool(
+                        query_engine=company_query_engine,
+                        metadata=ToolMetadata(
+                            name='company_index',
+                            description=f'{company_description}'
+                        ))]
+            elif company is None:
+                tender_query_engine = tender.as_query_engine(
+                    similarity_top_k=5)
+                tools = [QueryEngineTool(
+                    query_engine=tender_query_engine,
+                    metadata=ToolMetadata(
+                        name='tender_index',
+                        description=f'{tender_description}'
+                    ))]
+            else:
+                tender_query_engine = tender.as_query_engine(
+                    similarity_top_k=5)
+                company_query_engine = company.as_query_engine(
+                    similarity_top_k=5)
+                tools = [QueryEngineTool(
+                    query_engine=tender_query_engine,
+                    metadata=ToolMetadata(
+                        name='tender_index',
+                        description=f'{tender_description}'
+                    )),
+                    QueryEngineTool(
+                    query_engine=company_query_engine,
+                    metadata=ToolMetadata(
+                        name='company_index',
+                        description=f'{company_description}'
+                    ))]
+            agent = OpenAIAgent.from_tools(
+                tools, verbose=True, prompt=custom_prompt)
+            if history_message:
+                # qa_message=f"Devi rispondere in italiano."
+                # history_message.append({"role": "user", "content": qa_message})
+                agent.memory.set(history_message)
+            qa_message = f"{message}.Devi rispondere in italiano."
+            if colbert == 'No':
+                response = agent.stream_chat(qa_message)
+                # content_list = [item.content for item in response.sources]
+                # print(content_list)
 
-        #         if response.sources:
-        #             response_sources = response.source_nodes
-        #             stream_token = ""
-        #             for token in response.response_gen:
-        #                 stream_token += token
-        #                 yield history, messages_history
-        #             if stream_token and message:
-        #                 write_chat_history_to_db(
-        #                     f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
-        #         else:
-        #             history_message = []
-        #             response_sources = "No sources found."
-        #             qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, 
-        #                                         you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
-        #             history_message.append({"role": "user", "content": qa_message})
-        #             content = openai_agent(history_message)
+                if response.sources:
+                    response_sources = response.source_nodes
+                    stream_token = ""
+                    for token in response.response_gen:
+                        stream_token += token
+                        yield history, messages_history
+                    if stream_token and message:
+                        write_chat_history_to_db(
+                            f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+                else:
+                    history_message = []
+                    response_sources = "No sources found."
+                    qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, 
+                                                you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
+                    history_message.append({"role": "user", "content": qa_message})
+                    content = openai_agent(history_message)
 
-        #             partial_message = ""
-        #             for chunk in content:
-        #                 if chunk.choices[0].delta.content:
-        #                     partial_message = partial_message + \
-        #                         chunk.choices[0].delta.content
-        #                     yield history, messages_history
-        #             if partial_message and message:
-        #                 write_chat_history_to_db(
-        #                     f"{message}::::{partial_message}", "no_data")
-        #     else:
-        #         ragatouille_pack = RAGatouilleRetrieverPack(
-        #             documents,
-        #             llm=OpenAI(model='gpt-4-1106-preview'),
-        #             index_name="my_index",
-        #             top_k=5
-        #         )
-        #         response = ragatouille_pack.run(qa_message)
+                    partial_message = ""
+                    for chunk in content:
+                        if chunk.choices[0].delta.content:
+                            partial_message = partial_message + \
+                                chunk.choices[0].delta.content
+                            yield history, messages_history
+                    if partial_message and message:
+                        write_chat_history_to_db(
+                            f"{message}::::{partial_message}", "no_data")
+            else:
+                ragatouille_pack = RAGatouilleRetrieverPack(
+                    documents,
+                    llm=OpenAI(model='gpt-4-1106-preview'),
+                    index_name="my_index",
+                    top_k=5
+                )
+                response = ragatouille_pack.run(qa_message)
 
-        #         stream_token = ""
-        #         for token in str(response):
-        #             stream_token += token
-        #             yield history, messages_history
-        #         if stream_token and message:
-        #             write_chat_history_to_db(
-        #                 f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+                stream_token = ""
+                for token in str(response):
+                    stream_token += token
+                    yield history, messages_history
+                if stream_token and message:
+                    write_chat_history_to_db(
+                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
 
         if chatting_mode_status == "Documents and Search":
             if tender is None and company is None:
