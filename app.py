@@ -1,14 +1,17 @@
 import webbrowser
 from dotenv import load_dotenv
 from datetime import datetime
+import pandas as pd
+from llama_index.query_engine import SubQuestionQueryEngine
+from llama_index.response.schema import StreamingResponse
 import gradio as gr
 import sys
 import os
 import openai
 import logging
+from llama_index.prompts import Prompt
 import shutil
 import sqlite3
-from llama_index.prompts import Prompt
 from llama_index import (
     VectorStoreIndex,
     SimpleDirectoryReader,
@@ -17,24 +20,25 @@ from llama_index import (
 )
 from llama_index import ServiceContext
 from llama_index.storage.storage_context import StorageContext
-from langchain_community.chat_models import ChatOpenAI
+from langchain.chat_models import ChatOpenAI
 from llama_index.llms import OpenAI
 from llama_index.tools import QueryEngineTool, ToolMetadata
 from llama_index.llms import ChatMessage
 from llama_index.agent import OpenAIAgent, ContextRetrieverOpenAIAgent
-# from langchain.embeddings import OpenAIEmbeddings
+from langchain.embeddings import OpenAIEmbeddings
 from llama_index.tools.tool_spec.load_and_search.base import LoadAndSearchToolSpec
 import sys
 import psutil
 sys.path.append('./llama_hub/tools/google_search/')
 from base import GoogleSearchToolSpec
-from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
+
 from llama_index.llama_pack import download_llama_pack
 
-# Download and install dependencies
-# RAGatouilleRetrieverPack = download_llama_pack(
-#     "RAGatouilleRetrieverPack", "./ragatouille_pack"
-# )
+# download and install dependencies
+RAGatouilleRetrieverPack = download_llama_pack(
+  "RAGatouilleRetrieverPack", "./ragatouille_pack"
+)
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -155,10 +159,7 @@ def set_description(name, tool_description: str):
 response_sources = ""
 # Set model
 model = gr.State('')
-model = "gpt-4-turbo"
-# Set colbert
-colbert = gr.State('')
-colbert = "No"
+model = "gpt-4-1106-preview"
 openai.api_key = os.getenv("openai_key")
 service_context = gr.State('')
 indices = {}
@@ -172,32 +173,20 @@ file_company_inform_datas = []
 current_session_id = ''
 session_list = []
 doc_ids = {"company": [], "tender": []}
-documents = []
-ragatouille_pack = gr.State('')
 company_doc_ids = []
 tender_doc_ids = []
 google_upload_url = ''
 google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
                        'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
 
+
 def set_chatting_mode(value):
     global chatting_mode_status
     chatting_mode_status = value
 
-# Set model
-def set_model(_model):
-    if _model == 'gpt-4-turbo':
-        _model = 'gpt-4-1106-preview'
-    global model
-    model = _model
-
-def set_colbert(_colbert):
-    global colbert
-    colbert = _colbert
-    initRAGatouille()
 
 set_chatting_mode("Only Document")
-set_model('gpt-4-turbo')
+
 
 def getSessionList():
     global current_session_id
@@ -337,21 +326,8 @@ def load_or_update_index(directory, index_key):
         status += f"Index for {index_key} already up-to-date. No action taken.\n"
     return indices[index_key]
 
-def initRAGatouille():
-    global documents
-    documents = []
+# Modified upload_file function to handle index_key
 
-    directory_paths = [f"data/tender/{current_session_id}", f"data/company/{current_session_id}"]
-
-    for directory_path in directory_paths:
-        if os.path.isdir(directory_path):
-            try:
-                docs = SimpleDirectoryReader(directory_path, filename_as_id=True).load_data()
-                documents.extend(docs)
-            except Exception as e:
-                print(f"Error processing directory {directory_path}: {e}")
-        else:
-            print(f"Warning: Directory '{directory_path}' not found")
 
 def upload_file(files, index_key):
     global index_needs_update
@@ -476,7 +452,6 @@ async def bot(history, messages_history):
         global indices
         global google_source_urls
         global google_upload_url
-
         if openai.api_key == "":
             gr.Warning("Invalid OpenAI API key.")
             raise ValueError("Invalid OpenAI API key.")
@@ -499,8 +474,6 @@ async def bot(history, messages_history):
             yield "Index not found. Please upload the files first."
         tools = []
         message = history[-1][0]
-        print("=====================> company index: ", company)
-        print("=====================> tender index: ", tender)
         if chatting_mode_status == "Only Document":
             if tender is None and company is None:
                 gr.Warning("Index not found. Please upload the files first.")
@@ -549,54 +522,37 @@ async def bot(history, messages_history):
                 # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
             qa_message = f"{message}.Devi rispondere in italiano."
-            if colbert == 'No':
-                response = agent.stream_chat(qa_message)
-                # content_list = [item.content for item in response.sources]
-                # print(content_list)
+            response = agent.stream_chat(qa_message)
+            # content_list = [item.content for item in response.sources]
+            # print(content_list)
 
-                if response.sources:
-                    response_sources = response.source_nodes
-                    stream_token = ""
-                    for token in response.response_gen:
-                        stream_token += token
-                        yield history, messages_history
-                    if stream_token and message:
-                        write_chat_history_to_db(
-                            f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
-                else:
-                    history_message = []
-                    response_sources = "No sources found."
-                    qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
-                    history_message.append({"role": "user", "content": qa_message})
-                    content = openai_agent(history_message)
-
-                    partial_message = ""
-                    for chunk in content:
-                        if chunk.choices[0].delta.content:
-                            partial_message = partial_message + \
-                                chunk.choices[0].delta.content
-                            yield history, messages_history
-                    if partial_message and message:
-                        write_chat_history_to_db(
-                            f"{message}::::{partial_message}", "no_data")
-            else:
-                ragatouille_pack = RAGatouilleRetrieverPack(
-                    documents,
-                    llm=OpenAI(model='gpt-4-1106-preview'),
-                    index_name="my_index",
-                    top_k=5
-                )
-                response = ragatouille_pack.run(qa_message)
-
+            if response.sources:
+                response_sources = response.source_nodes
                 stream_token = ""
-                for token in str(response):
+                for token in response.response_gen:
                     stream_token += token
                     yield history, messages_history
                 if stream_token and message:
                     write_chat_history_to_db(
                         f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+            else:
+                history_message = []
+                response_sources = "No sources found."
+                qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
+                history_message.append({"role": "user", "content": qa_message})
+                content = openai_agent(history_message)
 
-        if chatting_mode_status == "Documents and Search":
+                partial_message = ""
+                for chunk in content:
+                    if chunk.choices[0].delta.content:
+                        partial_message = partial_message + \
+                            chunk.choices[0].delta.content
+                        yield history, messages_history
+                if partial_message and message:
+                    write_chat_history_to_db(
+                        f"{message}::::{partial_message}", "no_data")
+
+        elif chatting_mode_status == "Documents and Search":
             if tender is None and company is None:
                 gr.Warning("Index not found. Please upload the files first.")
                 yield "Index not found. Please upload the files first."
@@ -648,50 +604,33 @@ async def bot(history, messages_history):
                 # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
             qa_message = f"{message}.Devi rispondere in italiano."
-            if colbert == 'No':
-                response = agent.stream_chat(qa_message)
-                source_urls = google_spec.get_source_url(qa_message)
-                stream_token = ""
-                if response.source_nodes == []:
-                    temp_arry = []
-                    temp_arry.append(message)
-                    for source_url in source_urls:
-                        temp_arry.append(source_url['link'])
-                    if google_source_urls[0][0] == 'No data':
-                        google_source_urls = []
-                        google_source_urls.append(temp_arry)
-                    else:
-                        google_source_urls.append(temp_arry)
-                    # print(google_source_urls)
-
-                elif response.source_nodes:
-                    response_sources = response.source_nodes
+            response = agent.stream_chat(qa_message)
+            source_urls = google_spec.get_source_url(qa_message)
+            stream_token = ""
+            if response.source_nodes == []:
+                temp_arry = []
+                temp_arry.append(message)
+                for source_url in source_urls:
+                    temp_arry.append(source_url['link'])
+                if google_source_urls[0][0] == 'No data':
+                    google_source_urls = []
+                    google_source_urls.append(temp_arry)
                 else:
-                    response_sources = "No sources found."
+                    google_source_urls.append(temp_arry)
+                # print(google_source_urls)
 
-                for token in response.response_gen:
-                    stream_token += token
-                    yield history, messages_history
-
-                if stream_token and message:
-                    write_chat_history_to_db(
-                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+            elif response.source_nodes:
+                response_sources = response.source_nodes
             else:
-                ragatouille_pack = RAGatouilleRetrieverPack(
-                    documents,
-                    llm=OpenAI(model='gpt-4-1106-preview'),
-                    index_name="my_index",
-                    top_k=5
-                )
-                response = ragatouille_pack.run(qa_message)
+                response_sources = "No sources found."
 
-                stream_token = ""
-                for token in str(response):
-                    stream_token += token
-                    yield history, messages_history
-                if stream_token and message:
-                    write_chat_history_to_db(
-                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
+            for token in response.response_gen:
+                stream_token += token
+                yield history, messages_history
+
+            if stream_token and message:
+                write_chat_history_to_db(
+                    f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
         else:
             history_message = []
             for history_data in loaded_history[-min(5, len(loaded_history)):]:
@@ -902,6 +841,13 @@ def delete_row(index_key, file_name):
         return debug_info
     else:
         return None
+# Set model
+
+
+def set_model(_model):
+    global model
+    model = _model
+
 
 def get_sources(choice):
     if choice == "view source":
@@ -920,6 +866,14 @@ def set_openai_api_key(api_key: str):
             llm_predictor=llm_predictor, chunk_size=1024)
     else:
         gr.Warning("Please enter a valid OpenAI API key or set the env key.")
+    # ragatouille_pack = RAGatouilleRetrieverPack(
+    #     docs, # List[Document]
+    #     llm=OpenAI(model="gpt-3.5-turbo"),
+    #     index_name="my_index",
+    #     top_k=5
+    # )
+
+
 
 def openai_agent(prompt):
     response = openai.chat.completions.create(
@@ -1034,7 +988,7 @@ def set_session(evt: gr.SelectData):
     global current_session_id
     select_data = evt.index
     current_session_id = session_list[int(select_data[0])]
-
+    
 # _________________________________________________________________#
 # Define the Gradio interface
 
@@ -1058,7 +1012,7 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
     session_state = gr.State([])
     def user(user_message, history):
         return "", history + [[user_message, None]]
-
+    
     with gr.Row():
         with gr.Column(scale=1, min_width=200):
             session_title = gr.Textbox(label="Session Title")
@@ -1159,16 +1113,10 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                     "company_description", x), inputs=company_description_textbox)
 
                 radio = gr.Radio(
-                    value="gpt-4-turbo", choices=["gpt-3.5-turbo", "gpt-4-turbo"], label="Models"
+                    value="gpt-4-1106-preview", choices=["gpt-3.5-turbo", "gpt-4-1106-preview"], label="Models"
                 )
 
                 radio.change(set_model, inputs=radio)
-
-                radioColBERT = gr.Radio(
-                    value="No", choices=["Yes", "No"], label="ColBERT"
-                )
-
-                radioColBERT.change(set_colbert, inputs=radioColBERT) 
 
                 with gr.Row():
                     tender_data = get_tender_files_inform(
