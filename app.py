@@ -32,9 +32,9 @@ from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieve
 from llama_index.llama_pack import download_llama_pack
 
 # Download and install dependencies
-RAGatouilleRetrieverPack = download_llama_pack(
-    "RAGatouilleRetrieverPack", "./ragatouille_pack"
-)
+# RAGatouilleRetrieverPack = download_llama_pack(
+#     "RAGatouilleRetrieverPack", "./ragatouille_pack"
+# )
 # Load environment variables from .env file
 load_dotenv()
 
