@@ -190,7 +190,6 @@ def set_model(_model):
         _model = 'gpt-4-1106-preview'
     global model
     model = _model
-    print("=====> print model: ", model)
 
 def set_colbert(_colbert):
     global colbert
@@ -500,8 +499,7 @@ async def bot(history, messages_history):
             yield "Index not found. Please upload the files first."
         tools = []
         message = history[-1][0]
-        print("=====================> company index: ", company)
-        print("=====================> tender index: ", tender)
+        print("=====> print model: ", model)
         if chatting_mode_status == "Only Document":
             if tender is None and company is None:
                 gr.Warning("Index not found. Please upload the files first.")
