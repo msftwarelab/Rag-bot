@@ -564,7 +564,7 @@ async def bot(history, messages_history):
                 else:
                     history_message = []
                     response_sources = "No sources found."
-                    qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' but if not, you have to say 'mi spiace non ho trovato informazioni pertinenti.'.Devi rispondere in italiano. "
+                    qa_message = f"({message}).If parentheses content is saying hello,you have to say 'Ciao! Come posso aiutarti oggi?' Devi rispondere in italiano. "
                     history_message.append({"role": "user", "content": qa_message})
                     content = openai_agent(history_message)
 
