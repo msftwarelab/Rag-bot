@@ -26,8 +26,8 @@ from langchain.embeddings import OpenAIEmbeddings
 from llama_index.tools.tool_spec.load_and_search.base import LoadAndSearchToolSpec
 import sys
 import psutil
-sys.path.append('./llama_hub/tools/google_search/')
-from base import GoogleSearchToolSpec
+from llama_hub.tools.google_search.base import GoogleSearchToolSpec
+
 from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
 from llama_index.llama_pack import download_llama_pack
 
@@ -564,7 +564,7 @@ async def bot(history, messages_history):
                 else:
                     history_message = []
                     response_sources = "No sources found."
-                    qa_message = f"({message}) Devi rispondere in italiano. "
+                    qa_message = f"({message}). Devi rispondere in italiano. "
                     history_message.append({"role": "user", "content": qa_message})
                     content = openai_agent(history_message)
 
