@@ -635,12 +635,12 @@ async def bot(history, messages_history):
                         description=f'{company_description}'
                     ))]
             google_spec = GoogleSearchToolSpec(
-                key=google_api_key, engine=google_engine_id, siteSearch=google_upload_url)
+                key=google_api_key, engine=google_engine_id)
             google_tools = LoadAndSearchToolSpec.from_defaults(
                 google_spec.to_tool_list()[0]
             ).to_tool_list()
-            agent = OpenAIAgent.from_tools(
-                [*tools, *google_tools], verbose=True, prompt=custom_prompt)
+            # agent = OpenAIAgent.from_tools([*tools, *google_tools], verbose=True, prompt=custom_prompt)
+            agent = OpenAIAgent.from_tools(google_tools, verbose=True, prompt=custom_prompt)
             if history_message:
                 # qa_message=f"Devi rispondere in italiano."
                 # history_message.append({"role": "user", "content": qa_message})
@@ -648,21 +648,23 @@ async def bot(history, messages_history):
             qa_message = f"{message}.Devi rispondere in italiano."
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
-                source_urls = google_spec.get_source_url(qa_message)
+                print("==============> response: ", response)
+                # source_urls = google_spec.get_source_url(qa_message)
                 stream_token = ""
-                if response.source_nodes == []:
-                    temp_arry = []
-                    temp_arry.append(message)
-                    for source_url in source_urls:
-                        temp_arry.append(source_url['link'])
-                    if google_source_urls[0][0] == 'No data':
-                        google_source_urls = []
-                        google_source_urls.append(temp_arry)
-                    else:
-                        google_source_urls.append(temp_arry)
-                    # print(google_source_urls)
+                # if response.source_nodes == []:
+                #     temp_arry = []
+                #     temp_arry.append(message)
+                #     for source_url in source_urls:
+                #         temp_arry.append(source_url['link'])
+                #     if google_source_urls[0][0] == 'No data':
+                #         google_source_urls = []
+                #         google_source_urls.append(temp_arry)
+                #     else:
+                #         google_source_urls.append(temp_arry)
+                #     # print(google_source_urls)
 
-                elif response.source_nodes:
+                # elif response.source_nodes:
+                if response.source_nodes:
                     response_sources = response.source_nodes
                 else:
                     response_sources = "No sources found."
