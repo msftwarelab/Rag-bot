@@ -4,8 +4,8 @@ import urllib.parse
 from typing import Optional
 
 import requests
-from llama_index.core.schema import Document
-from llama_index.core.tools.tool_spec.base import BaseToolSpec
+from llama_index.tools.tool_spec.base import BaseToolSpec
+from llama_index.readers.schema.base import Document
 
 QUERY_URL_TMPL = (
     "https://www.googleapis.com/customsearch/v1?key={key}&cx={engine}&q={query}"
