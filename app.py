@@ -341,7 +341,7 @@ def initRAGatouille():
     global documents
     documents = []
 
-    directory_paths = [f"data/tender/{current_session_id}", f"data/company/{current_session_id}"]
+    directory_paths = [f"./data/tender/{current_session_id}", f"./data/company/{current_session_id}"]
 
     for directory_path in directory_paths:
         if os.path.isdir(directory_path):
@@ -619,9 +619,9 @@ async def bot(history, messages_history):
                     ))]
             else:
                 tender_query_engine = tender.as_query_engine(
-                    similarity_top_k=5)
+                    similarity_top_k=2)
                 company_query_engine = company.as_query_engine(
-                    similarity_top_k=5)
+                    similarity_top_k=2)
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
@@ -639,32 +639,30 @@ async def bot(history, messages_history):
             google_tools = LoadAndSearchToolSpec.from_defaults(
                 google_spec.to_tool_list()[0]
             ).to_tool_list()
-            # agent = OpenAIAgent.from_tools([*tools, *google_tools], verbose=True, prompt=custom_prompt)
-            agent = OpenAIAgent.from_tools(google_tools, verbose=True, prompt=custom_prompt)
-            if history_message:
-                # qa_message=f"Devi rispondere in italiano."
-                # history_message.append({"role": "user", "content": qa_message})
-                agent.memory.set(history_message)
+            agent = OpenAIAgent.from_tools([*tools, *google_tools], verbose=True, prompt=custom_prompt)
+            # if history_message:
+            #     qa_message=f"Devi rispondere in italiano."
+            #     history_message.append({"role": "user", "content": qa_message})
+            #     agent.memory.set(history_message)
             qa_message = f"{message}.Devi rispondere in italiano."
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
                 print("==============> response: ", response)
-                # source_urls = google_spec.get_source_url(qa_message)
+                source_urls = google_spec.get_source_url(qa_message)
                 stream_token = ""
-                # if response.source_nodes == []:
-                #     temp_arry = []
-                #     temp_arry.append(message)
-                #     for source_url in source_urls:
-                #         temp_arry.append(source_url['link'])
-                #     if google_source_urls[0][0] == 'No data':
-                #         google_source_urls = []
-                #         google_source_urls.append(temp_arry)
-                #     else:
-                #         google_source_urls.append(temp_arry)
-                #     # print(google_source_urls)
+                if response.source_nodes == []:
+                    temp_arry = []
+                    temp_arry.append(message)
+                    for source_url in source_urls:
+                        temp_arry.append(source_url['link'])
+                    if google_source_urls[0][0] == 'No data':
+                        google_source_urls = []
+                        google_source_urls.append(temp_arry)
+                    else:
+                        google_source_urls.append(temp_arry)
+                    # print(google_source_urls)
 
-                # elif response.source_nodes:
-                if response.source_nodes:
+                elif response.source_nodes:
                     response_sources = response.source_nodes
                 else:
                     response_sources = "No sources found."
