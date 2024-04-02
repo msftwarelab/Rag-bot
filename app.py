@@ -198,7 +198,7 @@ def set_colbert(_colbert):
     colbert = _colbert
     initRAGatouille()
 
-set_chatting_mode("Only Document")
+set_chatting_mode("Documents and Search")
 set_model(model)
 
 def getSessionList():
@@ -665,7 +665,7 @@ async def bot(history, messages_history):
             #     history_message.append({"role": "user", "content": qa_message})
             #     agent.memory.set(history_message)
             
-            qa_message = f"{message}. Devi rispondere in italiano."
+            qa_message = f":{message}. Devi rispondere in italiano."
             
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
