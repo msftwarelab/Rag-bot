@@ -655,10 +655,16 @@ async def bot(history, messages_history):
             search_results = google_spec.google_search(message)
             for result in search_results:
                 result_dict = json.loads(result.text)
-                # Extracting the snippet value
-                snippet = result_dict['items'][0]['snippet']
-                node = Document(text=snippet)
-                company.insert_nodes([node])
+                if 'items' in result_dict and result_dict['items']:
+                    snippet = result_dict['items'][0].get('snippet')
+                    if snippet:
+                        node = Document(text=snippet)
+                        company.insert_nodes([node])
+                    else:
+                        print("No snippet found in the result.")
+                else:
+                    print("No 'items' key found in the result dictionary or 'items' list is empty.")
+
 
             # google_tools = LoadAndSearchToolSpec.from_defaults(
             #     google_spec.to_tool_list()[0]
@@ -696,6 +702,7 @@ async def bot(history, messages_history):
                     response_sources = response.source_nodes
                 else:
                     response_sources = "No sources found."
+                print("==> response_sources: ", response_sources)
 
                 for token in response.response_gen:
                     stream_token += token
