@@ -652,6 +652,14 @@ async def bot(history, messages_history):
                         node = Document(text=snippet)
                         company.insert_nodes([node])
 
+            search_results = google_spec.google_search(message)
+            for result in search_results:
+                result_dict = json.loads(result.text)
+                # Extracting the snippet value
+                snippet = result_dict['items'][0]['snippet']
+                node = Document(text=snippet)
+                company.insert_nodes([node])
+
             # google_tools = LoadAndSearchToolSpec.from_defaults(
             #     google_spec.to_tool_list()[0]
             # ).to_tool_list()
