@@ -2,7 +2,6 @@ import webbrowser
 from dotenv import load_dotenv
 from datetime import datetime
 import gradio as gr
-import sys
 import os
 import json
 import openai
@@ -26,26 +25,20 @@ from llama_index.llms import ChatMessage
 from llama_index.agent import OpenAIAgent, ContextRetrieverOpenAIAgent
 from langchain.embeddings import OpenAIEmbeddings
 from llama_index.tools.tool_spec.load_and_search.base import LoadAndSearchToolSpec
-import sys
 import psutil
 from llama_hub.tools.google_search.base import GoogleSearchToolSpec
 
 from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
 from llama_index.llama_pack import download_llama_pack
 
-# Download and install dependencies
+load_dotenv()
+
 RAGatouilleRetrieverPack = download_llama_pack(
     "RAGatouilleRetrieverPack", "./ragatouille_pack"
 )
-# Load environment variables from .env file
-load_dotenv()
-
-# _________________________________________________________________#
-# Establish a connection to the SQLite database
 
 conn = sqlite3.connect("chat_history.db")
 cursor_1 = conn.cursor()
-# Create a table to store chat history if it doesn't exist
 cursor_1.execute('''
     CREATE TABLE IF NOT EXISTS chat_history (
         id INTEGER PRIMARY KEY,
@@ -67,7 +60,7 @@ conn.close()
 
 
 # Adding the Theme here ##
-wordlift_theme = gr.themes.Soft(
+WORDLIFT_THEME = gr.themes.Soft(
     primary_hue=gr.themes.Color(
         c50="#007AFF",
         c100="rgba(0, 122, 255, 0.2)",
@@ -128,37 +121,14 @@ wordlift_theme = gr.themes.Soft(
 
 template = '''Abbiamo fornito le informazioni di contesto di seguito:{context_str}
 Prendendo in considerazione queste informazioni, in qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire risposte e fonti alle seguenti domande.Devi sempre rispondere in italiano: {query_str}'''
-
 custom_prompt = Prompt(template)
-# Set the custom prompt
-
-
-def set_prompt(prompt):
-    global custom_prompt
-    custom_prompt = Prompt(prompt)
-
-
 tender_description = gr.State("")
 company_description = gr.State("")
 tender_description = "Questo è uno strumento che assiste nella redazione delle risposte relative al bando di gara ed ai relativi contenuti. Può essere impiegato per ottenere informazioni dettagliate sul bando, sul contesto normativo e sugli obiettivi dell'Unione Europea, dello Stato e della Regione. Utilizzalo per ottimizzare la tua strategia di risposta e per garantire la conformità con le linee guida e i requisiti specificati."
 company_description = "Questo è uno strumento che assiste nella creazione di contenuti relativi all'azienda. Può essere utilizzato per rispondere a domande relative all'azienda."
-
-
-def set_description(name, tool_description: str):
-    if name == "tender_description":
-        global tender_description
-        tender_description = tool_description
-    elif name == "company_description":
-        global company_description
-        company_description = tool_description
-
-
-# _________________________________________________________________#
 response_sources = ""
-# Set model
 model = gr.State('')
 model = "gpt-4-turbo"
-# Set colbert
 colbert = gr.State('')
 colbert = "No"
 openai.api_key = os.getenv("openai_key")
@@ -168,7 +138,7 @@ index_needs_update = {"company": True, "tender": True}
 status = ""
 source_infor_results = []
 google_api_key = os.getenv('google_search_key')
-google_engine_id = os.getenv('google_engine_id')
+GOOGLE_ENGINE_ID = os.getenv('google_engine_id')
 file_tender_inform_datas = []
 file_company_inform_datas = []
 current_session_id = ''
@@ -179,14 +149,24 @@ ragatouille_pack = gr.State('')
 company_doc_ids = []
 tender_doc_ids = []
 google_upload_url = ''
-google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
-                       'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
+google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
+
+def set_prompt(prompt):
+    global custom_prompt
+    custom_prompt = Prompt(prompt)
+
+def set_description(name, tool_description: str):
+    global tender_description
+    global company_description
+    if name == "tender_description":
+        tender_description = tool_description
+    elif name == "company_description":
+        company_description = tool_description
 
 def set_chatting_mode(value):
     global chatting_mode_status
     chatting_mode_status = value
 
-# Set model
 def set_model(_model):
     if _model == 'gpt-4-turbo':
         _model = 'gpt-4-1106-preview'
@@ -198,53 +178,40 @@ def set_colbert(_colbert):
     colbert = _colbert
     initRAGatouille()
 
-set_chatting_mode("Documents and Search")
-set_model(model)
-
 def getSessionList():
     global current_session_id
     global session_list
     conn = sqlite3.connect("chat_history.db")
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM session_history ORDER BY id DESC")
-
     rows = cursor.fetchall()
-
     session_list = []
     temp = []
-    # Initialize chat history as an empty list
-    # If there are entries, add them to the list
     if len(rows) > 0:
-        # Get the last ID from the last row
         last_id = rows[0][0]
-
         if current_session_id == '':
             current_session_id = last_id
-        # Assuming id is the first column
         for row in rows:
-            # print(row[1])
             session_list.append(row[0])
             temp.append([row[1]])
     else:
         temp.append(['No Data'])
         gr.Info("You have to create Session")
-    # Close the connection
     conn.commit()
     conn.close()
     return temp
 
-
+set_chatting_mode("Documents and Search")
+set_model(model)
 getSessionList()
-# _______________________________________________________
-# pdf viewer
+
 def pdf_view_url():
-    # Use an HTML iframe element to embed the PDF viewer.
     pdf_viewer_html = f'<iframe src="file/assets/pdf_viewer.html" width="100%" height="470px"></iframe>'
     return pdf_viewer_html
 
 def get_available_storage():
     disk_usage = psutil.disk_usage('/')
-    available_storage_gb = disk_usage.free / (2**30)  # Convert bytes to GB
+    available_storage_gb = disk_usage.free / (2**30)
     return f"Available Storage: {available_storage_gb:.2f} GB"
 
 def get_tender_files_inform(directory_path):
@@ -252,8 +219,6 @@ def get_tender_files_inform(directory_path):
     if not os.path.exists(directory_path):
         os.makedirs(directory_path)
     files = os.listdir(directory_path)
-    # file_names = [open(f'./data/tender/{file}','rb') for file in files]
-    # print(f"---get_file---{file_names}----")
     if len(files) > 0:
         load_or_update_index(f"./data/tender/{current_session_id}/", 'tender')
     file_inform_data = []
@@ -283,10 +248,6 @@ def get_company_files_inform(directory_path):
         return file_company_inform_datas
     else:
         return [['No File', ' ']]
-
-# ________________________________________________________
-# Modified load_index function to handle multiple indices
-
 
 def load_index(directory_path, index_key):
     global status
@@ -326,6 +287,9 @@ def load_index(directory_path, index_key):
     logging.info("Index refreshed and persisted to storage.")
     return index
 
+def check_or_create_directory(directory_path):
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
 
 def load_or_update_index(directory, index_key):
     global indices
@@ -352,38 +316,31 @@ def initRAGatouille():
                 documents.extend(docs)
             except Exception as e:
                 print(f"Error processing directory {directory_path}: {e}")
+                raise
         else:
             print(f"Warning: Directory '{directory_path}' not found")
 
 def upload_file(files, index_key):
     global index_needs_update
+    global indices
     global google_source_urls
     global google_upload_url
     gr.Info("Indexing(uploading...)Please check the Debug output")
     directory_path = f"data/{index_key}/{current_session_id}"
-    # Check if the directory exists, if not, create it
-    if not os.path.exists(directory_path):
-        os.makedirs(directory_path)
+    check_or_create_directory(directory_path)
+    company = indices.get("company")
+
     for file in files:
-        # Define the destination file path
-        destination_path = os.path.join(
-            directory_path, os.path.basename(file.name))
-        # Move the file from its temporary location to the directory_path
+        destination_path = os.path.join(directory_path, os.path.basename(file.name))
         shutil.move(file.name, destination_path)
-    # Set index_needs_update for the specified index_key to True
+
     if index_key == "url":
         file_list = os.listdir(directory_path)
         for file_name in file_list:
             file_path = os.path.join(directory_path, file_name)
-            # Check if the item in the directory is a file (not a subdirectory)
             if os.path.isfile(file_path):
                 with open(file_path, 'r') as file:
                     file_content = file.read()
-                    # value = file_content.strip().split(',')
-
-                    # If splitting by comma resulted in only one value, split by white space
-                    # if len(value) == 1:
-                    # temp_arr=[]
                     google_source_urls = []
                     value = file_content.strip().split('\n')
                     value = value[:10]
@@ -391,24 +348,30 @@ def upload_file(files, index_key):
                         google_upload_url += f"siteSearch={val}&"
                     if len(value) < 10:
                         value.extend(['No data'] * (10 - len(value)))
-                    # temp_arr.append(['question']+value)
                     google_source_urls.append(['question']+value)
-                    # Do something with the file content, e.g., print it
-        # Load or update the index
         print(google_source_urls)
+        google_spec = GoogleSearchToolSpec(key=google_api_key, engine=GOOGLE_ENGINE_ID, num=1)
+        if google_source_urls[0][0] != 'No data':
+            for search_url in google_source_urls[0][1:]:
+                if search_url == 'No data':
+                    break
+                search_results = google_spec.google_search(search_url)
+
+                for result in search_results:
+                    result_dict = json.loads(result.text)
+                    snippet = result_dict['items'][0]['snippet']
+                    node = Document(text=snippet)
+                    company.insert_nodes([node])
+                print("The Google search result has been successfully inserted.")
     else:
         index_needs_update[index_key] = True
         load_or_update_index(directory_path, index_key)
         gr.Info("Documents are indexed")
     return "Files uploaded successfully!!!"
 
-
-# _________________________________________________________________#
 chat_history = []
 
-
 def get_chat_history():
-    # Create a new connection
     conn = sqlite3.connect("chat_history.db")
     cursor = conn.cursor()
     cursor.execute("""
@@ -418,25 +381,18 @@ def get_chat_history():
         ORDER BY id
     """, (current_session_id,))
     rows = cursor.fetchall()
-    # print(f'---chat_history-----{rows}')
-    # Initialize chat history as an empty list
     chat_history = []
-    # If there are entries, add them to the list
     if rows:
         for row in rows:
             chat_history.append(list(row[0].split("::::")))
-    # Close the connection
     conn.close()
     return chat_history
 
 
 def write_chat_history_to_db(value, source_inform):
-    # Create a new connection
     conn = sqlite3.connect("chat_history.db")
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO chat_history(chat_history,source_inform,session_id) VALUES (?,?,?)",
-                   (value, source_inform, current_session_id))
-
+    cursor.execute("INSERT INTO chat_history(chat_history,source_inform,session_id) VALUES (?,?,?)", (value, source_inform, current_session_id))
     conn.commit()
     conn.close()
 
@@ -446,10 +402,7 @@ def clear_chat_history():
     global chat_history
     global google_source_urls
     chat_history = []
-    google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
-                           'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
-
-    # Clear the chat history from the database as well
+    google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data','No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
     conn = sqlite3.connect("chat_history.db")
     cursor = conn.cursor()
     cursor.execute("DELETE FROM chat_history WHERE session_id = ?",
@@ -463,13 +416,10 @@ def clear_chat_history():
     directory_path = f"./temp/"
     if os.path.exists(directory_path):
         shutil.rmtree(directory_path)
-    # Update the interface after clearing chat history
     return gr.update(value=get_chat_history())
 
 
 async def bot(history, messages_history):
-    # Get the chat history from the database
-    # Define custom prompt
     if current_session_id == '':
         gr.Info("You have to create new session")
         return
@@ -485,10 +435,8 @@ async def bot(history, messages_history):
         loaded_history = get_chat_history()
         history_message = []
         for history_data in loaded_history[-min(5, len(loaded_history)):]:
-            history_message.append(ChatMessage(
-                role="user", content=history_data[0]))
-            history_message.append(ChatMessage(
-                role="assistant", content=history_data[1]))
+            history_message.append(ChatMessage(role="user", content=history_data[0]))
+            history_message.append(ChatMessage(role="assistant", content=history_data[1]))
 
         try:
             company = indices.get("company")
@@ -545,15 +493,10 @@ async def bot(history, messages_history):
             agent = OpenAIAgent.from_tools(
                 tools, verbose=True, prompt=custom_prompt)
             if history_message:
-                # qa_message=f"Devi rispondere in italiano."
-                # history_message.append({"role": "user", "content": qa_message})
                 agent.memory.set(history_message)
             qa_message = f"{message}.Devi rispondere in italiano."
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
-                # content_list = [item.content for item in response.sources]
-                # print(content_list)
-
                 if response.sources:
                     response_sources = response.source_nodes
                     stream_token = ""
@@ -621,8 +564,10 @@ async def bot(history, messages_history):
                     ))]
             else:
                 tender_query_engine = tender.as_query_engine(
+                    temperature=0.5,
                     similarity_top_k=2)
                 company_query_engine = company.as_query_engine(
+                    temperature=0.5,
                     similarity_top_k=2)
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
@@ -636,41 +581,6 @@ async def bot(history, messages_history):
                         name='company_index',
                         description=f'{company_description}'
                     ))]
-            google_spec = GoogleSearchToolSpec(
-                key=google_api_key, engine=google_engine_id, num=1)
-            if google_source_urls[0][0] != 'No data':
-                for search_url in google_source_urls[0][1:]:
-                    if search_url == 'No data':
-                        break
-                    search_results = google_spec.google_search(search_url)
-
-                    for result in search_results:
-                        result_dict = json.loads(result.text)
-
-                        # Extracting the snippet value
-                        snippet = result_dict['items'][0]['snippet']
-                        node = Document(text=snippet)
-                        company.insert_nodes([node])
-
-            search_results = google_spec.google_search(message)
-            for result in search_results:
-                result_dict = json.loads(result.text)
-                if 'items' in result_dict and result_dict['items']:
-                    snippet = result_dict['items'][0].get('snippet')
-                    if snippet:
-                        node = Document(text=snippet)
-                        company.insert_nodes([node])
-                    else:
-                        print("No snippet found in the result.")
-                else:
-                    print("No 'items' key found in the result dictionary or 'items' list is empty.")
-
-
-            # google_tools = LoadAndSearchToolSpec.from_defaults(
-            #     google_spec.to_tool_list()[0]
-            # ).to_tool_list()
-
-            # agent = OpenAIAgent.from_tools([*tools, *google_tools], verbose=True, prompt=custom_prompt)
             
             agent = OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
             
@@ -680,29 +590,24 @@ async def bot(history, messages_history):
             #     agent.memory.set(history_message)
             
             qa_message = f":{message}. Devi rispondere in italiano."
+            response = agent.stream_chat(qa_message)
+            if not response.source_nodes or response.source_nodes is None:
+                google_spec = GoogleSearchToolSpec(key=google_api_key, engine=GOOGLE_ENGINE_ID, num=1)
+                search_results = google_spec.google_search(message)
+                for result in search_results:
+                    result_dict = json.loads(result.text)
+                    snippet = result_dict['items'][0]['snippet']
+                    node = Document(text=snippet)
+                    company.insert_nodes([node])
+                print("======> Did google search")
             
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
-                # source_urls = google_spec.get_source_url(qa_message)
                 stream_token = ""
-                # if response.source_nodes == []:
-                #     temp_arry = []
-                #     temp_arry.append(message)
-                #     for source_url in source_urls:
-                #         temp_arry.append(source_url['link'])
-                #     if google_source_urls[0][0] == 'No data':
-                #         google_source_urls = []
-                #         google_source_urls.append(temp_arry)
-                #     else:
-                #         google_source_urls.append(temp_arry)
-                #     # print(google_source_urls)
-
-                # elif response.source_nodes:
                 if response.source_nodes:
                     response_sources = response.source_nodes
                 else:
                     response_sources = "No sources found."
-                print("==> response_sources: ", response_sources)
 
                 for token in response.response_gen:
                     stream_token += token
@@ -751,14 +656,11 @@ async def bot(history, messages_history):
                     f"{message}::::{partial_message}", "no_data")
 
     except ValueError as e:
-        # Display the warning message in the Gradio interface
         gr.Warning(str(e))
-
 
 def update_debug_info(upload_file):
     debug_info = status
     return debug_info
-
 
 def update_source_info():
     global response_sources
@@ -767,16 +669,12 @@ def update_source_info():
         return source_info
     else:
         for node_with_score in response_sources:
-            # Exract the Node object
             node = node_with_score.node
             text = node.text
-            # Extract file_name and page_label from extra_info
             extra_info = node.extra_info or {}
             file_name = extra_info.get("file_name")
             page_label = extra_info.get("page_label")
-            # Append extracted information to debug_info string
             source_info += f"File Name: {file_name}\n, Page Label: {page_label}\n\n"
-
         return source_info
     
 def update_url_info():
@@ -790,7 +688,6 @@ def update_url_info():
     file_list = os.listdir(directory_path)
     for file_name in file_list:
         file_path = os.path.join(directory_path, file_name)
-        # Check if the item in the directory is a file (not a subdirectory)
         if os.path.isfile(file_path):
             with open(file_path, 'r') as file:
                 file_content = file.read()
@@ -801,7 +698,6 @@ def update_url_info():
                     google_upload_url += f"siteSearch={val}&"
                 if len(value) < 10:
                     value.extend(['No data'] * (10 - len(value)))
-                # temp_arr.append(['question']+value)
                 google_source_urls.append(['question']+value)
 
 def update_source():
@@ -817,16 +713,13 @@ def update_source():
         ORDER BY id
     """, (current_session_id,))
     rows = cursor.fetchall()
-    # Initialize chat history as an empty list
     source_informs = []
-    # If there are entries, add them to the list
     if rows:
         for row in rows:
             if row[2] != "no_data":
                 temp = list(row[2].split("&&&&"))
                 temp.append(list(row[1].split("::::"))[0])
                 source_informs.append(temp)
-    # Close the connection
     if source_informs:
         for source_inform in source_informs:
             for temp in source_inform[:-2]:
@@ -834,7 +727,6 @@ def update_source():
                 temp_1.append(source_inform[-1])
                 source_infor_results.append(temp_1)
         conn.close()
-        # return chat_history
         final_result = []
         for result in source_infor_results:
             temp = []
@@ -857,14 +749,11 @@ def get_source_info():
         return source_info
     else:
         for node_with_score in response_sources:
-            # Extract the Node object
             node = node_with_score.node
             text = node.text
-            # Extract file_name and page_label from extra_info
             extra_info = node.extra_info or {}
             file_name = extra_info.get("file_name")
             page_label = extra_info.get("page_label")
-            # Append extracted information to debug_info string
             source_info += f"{file_name}::::{page_label}::::{text}&&&&"
         return source_info
 
@@ -876,7 +765,6 @@ def delete_index(index_key):
         directory_path = f"./storage/{index_key}/{current_session_id}"
         backup_path = f"./backup_path/{index_key}/{current_session_id}"
         documents_path = f"data/{index_key}/{current_session_id}"
-        # remove the directory and its contents
         if not os.path.exists(directory_path):
             os.makedirs(directory_path)
         if not os.path.exists(documents_path):
@@ -924,13 +812,7 @@ def delete_row(index_key, file_name):
                          if item.startswith(string_to_match)]
         for item in filtered_list:
             indices[index_key].delete_ref_doc(item, delete_from_docstore=True)
-        # shutil.rmtree(documents_path)
-        # index_needs_update[index_key] = True
-        # indices[index_key].refresh_ref_docs()
         id = indices[index_key].index_id
-        # print(os.path.abspath(documents_path))
-        # print(indices[index_key].docstore.doc_ids)
-        # load_or_update_index(directory_path, index_key)
         status = ""
         gr.Info("Index is deleted")
         debug_info = status
@@ -941,8 +823,6 @@ def delete_row(index_key, file_name):
 def get_sources(choice):
     if choice == "view source":
         return gr.Textbox.update(value=response_sources)
-# add state
-
 
 def set_openai_api_key(api_key: str):
     if api_key:
@@ -965,18 +845,13 @@ def openai_agent(prompt):
     )
     return response
 
-
 def update_company_info(upload_file):
-
     file_value = get_company_files_inform(directory_path=f"data/company/{current_session_id}")
     return gr.update(value=file_value)
 
-
 def update_tender_info(upload_file):
-
     file_value = get_tender_files_inform(directory_path=f"data/tender/{current_session_id}")
     return gr.update(value=file_value)
-
 
 def set_tender_pdf(evt: gr.SelectData):
     select_data = evt.index
@@ -987,7 +862,6 @@ def set_tender_pdf(evt: gr.SelectData):
         return gr.update(value=pdf_viewer_content)
     else:
         delete_row("tender", file_tender_inform_datas[int(select_data[0])][0])
-
 
 def set_company_pdf(evt: gr.SelectData):
     select_data = evt.index
@@ -1000,11 +874,9 @@ def set_company_pdf(evt: gr.SelectData):
         delete_row(
             "company", file_company_inform_datas[int(select_data[0])][0])
 
-
 def set_source_pdf(evt: gr.SelectData):
     pdf_viewer_content = f'<iframe src="file/data/company/{evt.value}" width="100%" height="800px"></iframe>'
     return gr.update(value=pdf_viewer_content)
-
 
 def set_highlight_pdf(evt: gr.SelectData):
     select_data = evt.index
@@ -1015,29 +887,20 @@ def set_highlight_pdf(evt: gr.SelectData):
     pdf_viewer_content = f'<h4>{source_text}</h4>'
     return gr.update(value=pdf_viewer_content)
 
-
 def search_files_by_name(root_dir, file_name):
     for foldername, subfolders, filenames in os.walk(root_dir):
         for filename in filenames:
             if filename == file_name:
                 return os.path.join(foldername, filename)
 
-    # return found_files
-
-
 def update_session(update_data):
     old_session = getSessionList()
     new_session = update_data.values
-
     for i in range(min(len(new_session), len(old_session))):
         nested_list1 = new_session[i]
         nested_list2 = old_session[i]
-
-        # Convert the nested lists to strings for comparison
         str1 = str(nested_list1)
         str2 = str(nested_list2)
-
-        # Check if the nested lists are different
         if str1 != str2:
             conn = sqlite3.connect("chat_history.db")
             cursor = conn.cursor()
@@ -1045,7 +908,6 @@ def update_session(update_data):
                            (nested_list1[0], session_list[i]))
             conn.commit()
             conn.close()
-
 
 def add_session(session_title):
     if session_title:
@@ -1055,7 +917,6 @@ def add_session(session_title):
         cursor.execute(
             "INSERT INTO session_history(session_title) VALUES (?)", (session_title,))
         current_session_id = cursor.lastrowid
-        # print(f'late id :{last_inserted_id}')
         current_session_id
         conn.commit()
         conn.close()
@@ -1064,16 +925,11 @@ def add_session(session_title):
         gr.Info("You have to input Sesstion title")
         return gr.update(value=getSessionList())
 
-
 def set_session(evt: gr.SelectData):
     global current_session_id
     select_data = evt.index
     current_session_id = session_list[int(select_data[0])]
 
-# _________________________________________________________________#
-# Define the Gradio interface
-
-# Load custom CSS
 with open(
     "./assets/custom.css",
     "r",
@@ -1081,15 +937,13 @@ with open(
 ) as f:
     customCSS = f.read()
 
-# Add the title
 title = f"""<h2 align="center">BLM Mostro <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACiklEQVR4AWIYSoAP0Hw5wMoRhVE4i8zOvtq2bSNOjbC2jaC27Tasbdt2g9q27duT5Ezy93a9M807ybd392LO9fwLmoIF4AJ4BX6Bb+AROAAmgOput9trp3F2MA98AkpgGb8BSuMO6O5yucyYXTmK/uALUBytIo+0UfZkvs4NUD16d5crJT73AMWRD8ZoUiPdxLwNQKqsqFuRpidEx/tG7E2jC2z8DOQVZQlIjoH+2myZNK9r5Xk8HjeSWUCRcRGYuw0kh0SjLzBNHqCD+YGuikDXJKAE3UFITQBKoymIWj6fz83NqAQ/uFwBVZLr9QIUBW3BNrAMxKLS3IQTaDqFnbiA5Ql4TLewQmttfY1onblUXp/PdIvfJpJb9Gis18/PghvsnVNqTZ9TesFQFrzjZrJdmAEDyQqgSF5ZfkLufFDfTnOepH36iZA33hd5y4E1aJTSxj60BefAN+GzyCrMyoxzMMV358SN2J5+R+TxU1yf/6Hi9LuSaDqQnRlnMEUZnXTmndL2ryWAqb4J74FVNm/C1uCE5rNEVjilHcOGwDZxMAeAEvSUdUaJi6iqgydgHVCkoCwvzMxrfI87fRVfME3zH59dLGweIDSLWvo7RXsZtQ7UpryIggqyIxvAkjhex1e4vCVFrHHJFWJQs+wKSEzTHygg+QUqh9soZ2TorYdk3NF5A8+gJgYhgv4grDKCK2I5cmodPKQ/iBfMB1DTyvN6vW4k04T5LL8/IeINnp7Rr+KDB3Lk64KE5aVF3fKgstWejDAMI2JzGSGPAT8i+GPSnfl6vQeclbhUECwTHbH4xGv7mTQlzzhrSeM115elM5fhhhZcfGDAMQ/UZfjlrNwQlBQXjhnPc/4Aqf7wDR6odCYAAAAASUVORK5CYII=" alt="client" style="display: inline;"></h2>"""
 
 clear = gr.Button("🧹 Start fresh")
 
-with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
+with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
     gr.Info("Please enter a valid OpenAI API key or set the env key.")
     gr.HTML(value=title)
-
     session_state = gr.State([])
     def user(user_message, history):
         return "", history + [[user_message, None]]
@@ -1098,40 +952,38 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
         with gr.Column(scale=1, min_width=200):
             session_title = gr.Textbox(label="Session Title")
             new_session_btn = gr.Button(value="New Session")
-            session_list_dataframe = gr.Dataframe(value=getSessionList,
-                                                  headers=["Session List"],
-                                                  datatype=["str"],
-                                                  col_count=(1, "fixed"),
-                                                  height=600,
-                                                  interactive=True,
-                                                  elem_id="session_dataframe")
+            session_list_dataframe = gr.Dataframe(
+                value=getSessionList,
+                headers=["Session List"],
+                datatype=["str"],
+                col_count=(1, "fixed"),
+                height=600,
+                interactive=True,
+                elem_id="session_dataframe"
+            )
         with gr.Column(scale=15):
             with gr.Row():
                 with gr.Column(scale=6):
-                    chatbot = gr.Chatbot(value=get_chat_history(),
-                        elem_id="chuanhu_chatbot", height="850px")
-
+                    chatbot = gr.Chatbot(value=get_chat_history(), elem_id="chuanhu_chatbot", height="850px")
                     msg = gr.Textbox(
                         label=" 🪄",
                         placeholder="Type a message to the bot and press enter",
                         container=False,
                     )
                 with gr.Column(scale=4):
-                    source_dataframe = gr.Dataframe(value=update_source,
-                                                    headers=[
-                                                        "question", "File name", "page numeber"],
-                                                    datatype=[
-                                                        "str", "str", "str"],
-                                                    col_count=(3, "fixed"),
-                                                    row_count=5,
-                                                    wrap=False,
-                                                    height=300,
-                                                    label="Agent Mode Q&A history",
-                                                    interactive=False,
-                                                    elem_id="source_dataframe"
-                                                    )
-                    pdf_viewer_html = gr.HTML(
-                        value=pdf_view_url, label="preview", elem_id="pdf_reference")
+                    source_dataframe = gr.Dataframe(
+                        value=update_source,
+                        headers=["question", "File name", "page numeber"],
+                        datatype=["str", "str", "str"],
+                        col_count=(3, "fixed"),
+                        row_count=5,
+                        wrap=False,
+                        height=300,
+                        label="Agent Mode Q&A history",
+                        interactive=False,
+                        elem_id="source_dataframe"
+                    )
+                    pdf_viewer_html = gr.HTML(value=pdf_view_url, label="preview", elem_id="pdf_reference")
                     clear = gr.Button("🧹 Start fresh")
             with gr.Accordion("⚙️ Settings", open=False):
                 with gr.Tab("history"):
@@ -1139,8 +991,7 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                         value=google_source_urls,
                         headers=["Question", "Source URL-1", "Source URL-2", "Source URL-3", "Source URL-4",
                                  "Source URL-5", "Source URL-6", "Source URL-7", "Source URL-8", "Source URL-9", "Source URL-10"],
-                        datatype=["str", "str", "str", "str", "str",
-                                  "str", "str", "str", "str", "str", "str"],
+                        datatype=["str", "str", "str", "str", "str","str", "str", "str", "str", "str", "str"],
                         col_count=(11, "fixed"),
                         label="Google search source url",
                         interactive=False
@@ -1152,36 +1003,24 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                     lines=1,
                     type="password",
                 )
-                openai_api_key_textbox.change(
-                    set_openai_api_key, inputs=openai_api_key_textbox)
-                # chatting_mode_slide=gr.Slider(1,3,
-                #                             step=1,
-                #                             label="Chatting Quality > Agent Type",
-                #                             container=True ,
-                #                             info="Only Document > No Documents > Documents and Search",
-                #                             interactive=True)
+                openai_api_key_textbox.change(set_openai_api_key, inputs=openai_api_key_textbox)
                 chatting_mode_radio = gr.Radio(
                     value="Documents and Search", choices=["Only Document", "No Documents", "Documents and Search"], label="Chatting Quality > Agent Type"
                 )
-                # gr.HTML(value=f"<div style='display:inline'><span style='position: absolute;left: 0px;'>Low</span><span style='position: absolute;right: 0px;'>High</span></div>")
                 custom_prompt = gr.Textbox(
                     placeholder="Here goes the custom prompt",
                     value=template,
                     lines=5,
                     label="Custom Prompt",
                 )
-
                 custom_prompt.change(fn=set_prompt, inputs=custom_prompt)
-
                 tender_description_textbox = gr.Textbox(
                     placeholder="Here goes the tender description",
                     value=tender_description,
                     lines=5,
                     label="Tender Description",
                 )
-
-                tender_description_textbox.change(lambda x: set_description(
-                    "tender_description", x), inputs=tender_description_textbox)
+                tender_description_textbox.change(lambda x: set_description("tender_description", x), inputs=tender_description_textbox)
 
                 company_description_textbox = gr.Textbox(
                     placeholder="Here goes the company description",
@@ -1190,47 +1029,38 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                     label="Company Description",
                 )
 
-                company_description_textbox.change(lambda x: set_description(
-                    "company_description", x), inputs=company_description_textbox)
-
+                company_description_textbox.change(lambda x: set_description("company_description", x), inputs=company_description_textbox)
                 radio = gr.Radio(
                     value="gpt-4-turbo", choices=["gpt-3.5-turbo", "gpt-4-turbo"], label="Models"
                 )
-
                 radio.change(set_model, inputs=radio)
-
                 radioColBERT = gr.Radio(
                     value="No", choices=["Yes", "No"], label="ColBERT"
                 )
-
                 radioColBERT.change(set_colbert, inputs=radioColBERT) 
-
                 with gr.Row():
-                    tender_data = get_tender_files_inform(
-                        directory_path=f"data/tender/{current_session_id}")
-                    company_data = get_company_files_inform(
-                        directory_path=f"data/company/{current_session_id}")
+                    tender_data = get_tender_files_inform(directory_path=f"data/tender/{current_session_id}")
+                    company_data = get_company_files_inform(directory_path=f"data/company/{current_session_id}")
 
-                    tender_dataframe = gr.Dataframe(value=tender_data,
-                                                    headers=[
-                                                        "Tender File Name", "Action"],
-                                                    datatype=["str", "str"],
-                                                    col_count=(2, "fixed"),
-                                                    label="Tender File list",
-                                                    interactive=False
-                                                    )
+                    tender_dataframe = gr.Dataframe(
+                        value=tender_data,
+                        headers=["Tender File Name", "Action"],
+                        datatype=["str", "str"],
+                        col_count=(2, "fixed"),
+                        label="Tender File list",
+                        interactive=False
+                    )
 
-                    company_dataframe = gr.Dataframe(value=company_data,
-                                                     headers=[
-                                                         "Company File Name", "Action"],
-                                                     datatype=["str", "str"],
-                                                     col_count=(2, "fixed"),
-                                                     label="Company File list",
-                                                     interactive=False
-                                                     )
+                    company_dataframe = gr.Dataframe(
+                        value=company_data,
+                        headers=["Company File Name", "Action"],
+                        datatype=["str", "str"],
+                        col_count=(2, "fixed"),
+                        label="Company File list",
+                        interactive=False
+                    )
                 with gr.Tab("📁 Add your files here"):
                     with gr.TabItem("Tender documents"):
-
                         upload_button1 = gr.UploadButton(
                             file_types=[".pdf", ".csv", ".docx", ".txt"], file_count="multiple"
                         )
@@ -1259,7 +1089,6 @@ with gr.Blocks(css=customCSS, theme=wordlift_theme) as demo:
                     lines=5,
                     label="Sources",
                 )
-            # Debug Accordion
             with gr.Accordion("🔍 Debug", open=False):
                 debug_output = gr.Textbox(
                     placeholder="Debug output will be printed here",
