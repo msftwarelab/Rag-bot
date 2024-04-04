@@ -591,15 +591,15 @@ async def bot(history, messages_history):
             
             qa_message = f":{message}. Devi rispondere in italiano."
             response = agent.stream_chat(qa_message)
-            if not response.source_nodes or response.source_nodes is None:
-                google_spec = GoogleSearchToolSpec(key=google_api_key, engine=GOOGLE_ENGINE_ID, num=1)
-                search_results = google_spec.google_search(message)
-                for result in search_results:
-                    result_dict = json.loads(result.text)
-                    snippet = result_dict['items'][0]['snippet']
-                    node = Document(text=snippet)
-                    company.insert_nodes([node])
-                print("======> Did google search")
+            # if not response.source_nodes or response.source_nodes is None:
+            google_spec = GoogleSearchToolSpec(key=google_api_key, engine=GOOGLE_ENGINE_ID, num=1)
+            search_results = google_spec.google_search(message)
+            for result in search_results:
+                result_dict = json.loads(result.text)
+                snippet = result_dict['items'][0]['snippet']
+                node = Document(text=snippet)
+                company.insert_nodes([node])
+            print("======> Did google search")
             
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
