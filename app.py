@@ -25,6 +25,7 @@ from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from llama_index.core.llms.llm import ChatMessage
 from llama_index.agent.openai import OpenAIAgent
 from llama_hub.tools.google_search.base import GoogleSearchToolSpec
+from llama_hub.tools.tavily_research import TavilyToolSpec
 
 from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
 # from llama_index.core.llama_pack import download_llama_pack
@@ -126,7 +127,7 @@ tender_description = "Questo è uno strumento che assiste nella redazione delle 
 company_description = "Questo è uno strumento che assiste nella creazione di contenuti relativi all'azienda. Può essere utilizzato per rispondere a domande relative all'azienda."
 response_sources = ""
 model = gr.State('')
-model = "gpt-4-turbo"
+model = "gpt-4-turbo-preview"
 colbert = gr.State('')
 colbert = "No"
 openai.api_key = os.getenv("openai_key")
@@ -137,6 +138,7 @@ status = ""
 source_infor_results = []
 google_api_key = os.getenv('google_search_key')
 GOOGLE_ENGINE_ID = os.getenv('google_engine_id')
+TAVILY_API_KEY = os.getenv('tavily_api_key')
 file_tender_inform_datas = []
 file_company_inform_datas = []
 current_session_id = ''
@@ -166,8 +168,8 @@ def set_chatting_mode(value):
     chatting_mode_status = value
 
 def set_model(_model):
-    if _model == 'gpt-4-turbo':
-        _model = 'gpt-4-1106-preview'
+    if _model == 'gpt-4-turbo-preview':
+        _model = 'gpt-4-0125-preview'
     global model
     model = _model
 
@@ -538,6 +540,9 @@ async def bot(history, messages_history):
                         f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
 
         elif chatting_mode_status == "Documents and Search":
+            tavily_tool = TavilyToolSpec(
+                api_key=TAVILY_API_KEY,
+            )
             if tender is None and company is None:
                 gr.Warning("Index not found. Please upload the files first.")
                 yield "Index not found. Please upload the files first."
@@ -550,7 +555,8 @@ async def bot(history, messages_history):
                         metadata=ToolMetadata(
                             name='company_index',
                             description=f'{company_description}'
-                        ))]
+                        )),
+                        tavily_tool.to_tool_list()]
             elif company is None:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
@@ -559,7 +565,8 @@ async def bot(history, messages_history):
                     metadata=ToolMetadata(
                         name='tender_index',
                         description=f'{tender_description}'
-                    ))]
+                    )),
+                    tavily_tool.to_tool_list()]
             else:
                 tender_query_engine = tender.as_query_engine(
                     temperature=0.5,
@@ -578,8 +585,8 @@ async def bot(history, messages_history):
                     metadata=ToolMetadata(
                         name='company_index',
                         description=f'{company_description}'
-                    ))]
-            
+                    )),
+                    tavily_tool.to_tool_list()]
             agent = OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
             
             # if history_message:
@@ -590,14 +597,14 @@ async def bot(history, messages_history):
             qa_message = f":{message}. Devi rispondere in italiano."
             response = agent.stream_chat(qa_message)
             # if not response.source_nodes or response.source_nodes is None:
-            google_spec = GoogleSearchToolSpec(key=google_api_key, engine=GOOGLE_ENGINE_ID, num=1)
-            search_results = google_spec.google_search(message)
-            for result in search_results:
-                result_dict = json.loads(result.text)
-                snippet = result_dict['items'][0]['snippet']
-                node = Document(text=snippet)
-                company.insert_nodes([node])
-            print("======> Did google search")
+            # google_spec = GoogleSearchToolSpec(key=google_api_key, engine=GOOGLE_ENGINE_ID, num=1)
+            # search_results = google_spec.google_search(message)
+            # for result in search_results:
+            #     result_dict = json.loads(result.text)
+            #     snippet = result_dict['items'][0]['snippet']
+            #     node = Document(text=snippet)
+            #     company.insert_nodes([node])
+            # print("======> Did google search")
             
             if colbert == 'No':
                 response = agent.stream_chat(qa_message)
@@ -1029,7 +1036,7 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
 
                 company_description_textbox.change(lambda x: set_description("company_description", x), inputs=company_description_textbox)
                 radio = gr.Radio(
-                    value="gpt-4-turbo", choices=["gpt-3.5-turbo", "gpt-4-turbo"], label="Models"
+                    value="gpt-4-turbo-preview", choices=["gpt-3.5-turbo", "gpt-4-turbo-preview"], label="Models"
                 )
                 radio.change(set_model, inputs=radio)
                 radioColBERT = gr.Radio(

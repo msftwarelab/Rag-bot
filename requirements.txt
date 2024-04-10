@@ -10,5 +10,6 @@ python-dotenv
 nltk
 transformers
 ragatouille == 0.0.8.post2
+tavily-python == 0.3.3
 bs4
 srsly
