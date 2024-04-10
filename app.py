@@ -543,6 +543,7 @@ async def bot(history, messages_history):
             tavily_tool = TavilyToolSpec(
                 api_key=TAVILY_API_KEY,
             )
+            tavily_tool_list = tavily_tool.to_tool_list()
             if tender is None and company is None:
                 gr.Warning("Index not found. Please upload the files first.")
                 yield "Index not found. Please upload the files first."
@@ -555,8 +556,7 @@ async def bot(history, messages_history):
                         metadata=ToolMetadata(
                             name='company_index',
                             description=f'{company_description}'
-                        )),
-                        tavily_tool.to_tool_list()]
+                        ))]
             elif company is None:
                 tender_query_engine = tender.as_query_engine(
                     similarity_top_k=5)
@@ -565,8 +565,7 @@ async def bot(history, messages_history):
                     metadata=ToolMetadata(
                         name='tender_index',
                         description=f'{tender_description}'
-                    )),
-                    tavily_tool.to_tool_list()]
+                    ))]
             else:
                 tender_query_engine = tender.as_query_engine(
                     temperature=0.5,
@@ -585,8 +584,8 @@ async def bot(history, messages_history):
                     metadata=ToolMetadata(
                         name='company_index',
                         description=f'{company_description}'
-                    )),
-                    tavily_tool.to_tool_list()]
+                    ))]
+            tools.extend(tavily_tool_list)
             agent = OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
             
             # if history_message:
