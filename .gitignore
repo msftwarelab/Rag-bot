@@ -2,11 +2,12 @@ app_old.py
 app-chainlit.py
 __pycache__/*
 grad
-myenv/
+venv/
 storage/
 app - Copy.py
 data/
 temp/
 backup_path/
+ragatouille_pack/
 app_1.py
 *.env

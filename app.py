@@ -8,34 +8,32 @@ import openai
 import logging
 import shutil
 import sqlite3
-from llama_index.prompts import Prompt
-from llama_index import (
+import psutil
+from llama_index.core.prompts import PromptTemplate
+from llama_index.core import (
     VectorStoreIndex,
     SimpleDirectoryReader,
     load_index_from_storage,
-    LLMPredictor,
 )
-from llama_index import ServiceContext
-from llama_index import Document
-from llama_index.storage.storage_context import StorageContext
-from langchain.chat_models import ChatOpenAI
-from llama_index.llms import OpenAI
-from llama_index.tools import QueryEngineTool, ToolMetadata
-from llama_index.llms import ChatMessage
-from llama_index.agent import OpenAIAgent, ContextRetrieverOpenAIAgent
-from langchain.embeddings import OpenAIEmbeddings
-from llama_index.tools.tool_spec.load_and_search.base import LoadAndSearchToolSpec
-import psutil
+from llama_index.legacy.llm_predictor.base import LLMPredictor
+from llama_index.legacy.service_context import ServiceContext
+from llama_index.core.schema import Document
+from llama_index.core.storage.storage_context import StorageContext
+from langchain_community.chat_models import ChatOpenAI
+from llama_index.llms.openai import OpenAI
+from llama_index.core.tools import QueryEngineTool, ToolMetadata
+from llama_index.core.llms.llm import ChatMessage
+from llama_index.agent.openai import OpenAIAgent
 from llama_hub.tools.google_search.base import GoogleSearchToolSpec
 
 from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
-from llama_index.llama_pack import download_llama_pack
+# from llama_index.core.llama_pack import download_llama_pack
 
 load_dotenv()
 
-RAGatouilleRetrieverPack = download_llama_pack(
-    "RAGatouilleRetrieverPack", "./ragatouille_pack"
-)
+# RAGatouilleRetrieverPack = download_llama_pack(
+#     "RAGatouilleRetrieverPack", "./ragatouille_pack"
+# )
 
 conn = sqlite3.connect("chat_history.db")
 cursor_1 = conn.cursor()
@@ -121,7 +119,7 @@ WORDLIFT_THEME = gr.themes.Soft(
 
 template = '''Abbiamo fornito le informazioni di contesto di seguito:{context_str}
 Prendendo in considerazione queste informazioni, in qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire risposte e fonti alle seguenti domande.Devi sempre rispondere in italiano: {query_str}'''
-custom_prompt = Prompt(template)
+custom_prompt = PromptTemplate(template)
 tender_description = gr.State("")
 company_description = gr.State("")
 tender_description = "Questo è uno strumento che assiste nella redazione delle risposte relative al bando di gara ed ai relativi contenuti. Può essere impiegato per ottenere informazioni dettagliate sul bando, sul contesto normativo e sugli obiettivi dell'Unione Europea, dello Stato e della Regione. Utilizzalo per ottimizzare la tua strategia di risposta e per garantire la conformità con le linee guida e i requisiti specificati."
@@ -153,7 +151,7 @@ google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data', 'N
 
 def set_prompt(prompt):
     global custom_prompt
-    custom_prompt = Prompt(prompt)
+    custom_prompt = PromptTemplate(prompt)
 
 def set_description(name, tool_description: str):
     global tender_description
