@@ -118,8 +118,17 @@ WORDLIFT_THEME = gr.themes.Soft(
     input_background_fill="#F6F6F6",
 )
 
-template = '''Abbiamo fornito le informazioni di contesto di seguito:{context_str}
-Prendendo in considerazione queste informazioni, in qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire risposte e fonti alle seguenti domande.Devi sempre rispondere in italiano: {query_str}'''
+template = '''
+Abbiamo fornito le informazioni di contesto di seguito: {context_str}
+
+Prendendo in considerazione queste informazioni e utilizzando le risorse online disponibili, ti preghiamo di effettuare una ricerca approfondita sull'argomento. Cerca dati, statistiche, studi, articoli, e qualsiasi altra fonte rilevante che possa arricchire la risposta.
+
+In qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire una sintesi delle informazioni trovate, citando le fonti. Assicurati di valutare la credibilità e l'attualità delle informazioni raccolte.
+
+Devi sempre rispondere in italiano e fornire risposte dettagliate e ben argomentate alle seguenti domande: {query_str}
+
+Riassumi i punti chiave e le scoperte principali, includendo eventuali collegamenti diretti alle fonti online quando possibile.
+'''
 custom_prompt = PromptTemplate(template)
 tender_description = gr.State("")
 company_description = gr.State("")
@@ -456,7 +465,7 @@ async def bot(history, messages_history):
 
             elif tender is None:
                 company_query_engine = company.as_query_engine(
-                    similarity_top_k=5)
+                    similarity_top_k=10)
                 tools = [
                     QueryEngineTool(
                         query_engine=company_query_engine,
@@ -466,7 +475,7 @@ async def bot(history, messages_history):
                         ))]
             elif company is None:
                 tender_query_engine = tender.as_query_engine(
-                    similarity_top_k=5)
+                    similarity_top_k=10)
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
@@ -475,9 +484,9 @@ async def bot(history, messages_history):
                     ))]
             else:
                 tender_query_engine = tender.as_query_engine(
-                    similarity_top_k=5)
+                    similarity_top_k=10)
                 company_query_engine = company.as_query_engine(
-                    similarity_top_k=5)
+                    similarity_top_k=10)
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
@@ -549,7 +558,7 @@ async def bot(history, messages_history):
                 yield "Index not found. Please upload the files first."
             elif tender is None:
                 company_query_engine = company.as_query_engine(
-                    similarity_top_k=5)
+                    similarity_top_k=10)
                 tools = [
                     QueryEngineTool(
                         query_engine=company_query_engine,
@@ -559,7 +568,7 @@ async def bot(history, messages_history):
                         ))]
             elif company is None:
                 tender_query_engine = tender.as_query_engine(
-                    similarity_top_k=5)
+                    similarity_top_k=10)
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
@@ -569,10 +578,10 @@ async def bot(history, messages_history):
             else:
                 tender_query_engine = tender.as_query_engine(
                     temperature=0.5,
-                    similarity_top_k=2)
+                    similarity_top_k=10)
                 company_query_engine = company.as_query_engine(
                     temperature=0.5,
-                    similarity_top_k=2)
+                    similarity_top_k=10)
                 tools = [QueryEngineTool(
                     query_engine=tender_query_engine,
                     metadata=ToolMetadata(
