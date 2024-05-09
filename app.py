@@ -38,7 +38,6 @@ load_dotenv()
 #     "RAGatouilleRetrieverPack", "./ragatouille_pack"
 # )
 
-create_tables()
 openai.api_key = OPENAI_API_KEY
 
 class RagBot:
@@ -71,7 +70,8 @@ class RagBot:
         self.google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
         self.chatting_mode_status = ""
         self.chat_history = []
-
+        
+        create_tables()
         self.set_chatting_mode("Documents and Search")
         self.set_model(self.model)
         self.getSessionList()
