@@ -5,14 +5,14 @@ from .config import DATABASE_PATH
 def create_tables():
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
-    # cursor.execute('''
-    #     CREATE TABLE IF NOT EXISTS chat_history (
-    #         id INTEGER PRIMARY KEY,
-    #         chat_history TEXT,
-    #         source_inform TEXT,
-    #         session_id INTEGER
-    #     )
-    # ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY,
+            chat_history TEXT,
+            source_inform TEXT,
+            session_id INTEGER
+        )
+    ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS session_history (
             id INTEGER PRIMARY KEY,

@@ -1,6 +1,6 @@
 openai == 1.16.2
-llama-index == 0.10.0
-gradio == 4.25.0
+llama-index == 0.10.35
+gradio == 4.29.0
 llama-hub == 0.0.79.post1
 langchain == 0.1.14
 pypdf

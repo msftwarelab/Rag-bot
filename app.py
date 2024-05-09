@@ -440,7 +440,7 @@ class RagBot:
                 #     agent.memory.set(history_message)
                 
                 qa_message = f":{message}. Devi rispondere in italiano."
-                response = agent.stream_chat(qa_message)
+                # response = agent.stream_chat(qa_message)
                 
                 if self.colbert == 'No':
                     response = agent.stream_chat(qa_message)
