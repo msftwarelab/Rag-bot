@@ -8,7 +8,6 @@ import openai
 import logging
 import shutil
 import sqlite3
-import psutil
 from llama_index.core.prompts import PromptTemplate
 from llama_index.core import (
     VectorStoreIndex,
@@ -29,6 +28,9 @@ from llama_hub.tools.tavily_research import TavilyToolSpec
 
 from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
 # from llama_index.core.llama_pack import download_llama_pack
+from src.config import WORDLIFT_THEME, GOOGLE_API_KEY, GOOGLE_ENGINE_ID, TAVILY_API_KEY, OPENAI_API_KEY, TEMPLATE
+from src.database import create_tables, add_chat_history, get_chat_history, delete_chat_history
+from src.utilities import pdf_view_url, get_available_storage, check_or_create_directory
 
 load_dotenv()
 
@@ -36,912 +38,730 @@ load_dotenv()
 #     "RAGatouilleRetrieverPack", "./ragatouille_pack"
 # )
 
-conn = sqlite3.connect("chat_history.db")
-cursor_1 = conn.cursor()
-cursor_1.execute('''
-    CREATE TABLE IF NOT EXISTS chat_history (
-        id INTEGER PRIMARY KEY,
-        chat_history TEXT,
-        source_inform TEXT,
-        session_id INTEGER
-    )
-''')
-cursor_2 = conn.cursor()
-cursor_2.execute('''
-    CREATE TABLE IF NOT EXISTS session_history (
-        id INTEGER PRIMARY KEY,
-        session_title TEXT
-    )
-''')
+create_tables()
+openai.api_key = OPENAI_API_KEY
 
-conn.commit()
-conn.close()
+class RagBot:
+    def __init__(self):
+        self.custom_prompt = PromptTemplate(TEMPLATE)
+        self.tender_description = gr.State("")
+        self.company_description = gr.State("")
+        self.tender_description = "Questo è uno strumento che assiste nella redazione delle risposte relative al bando di gara ed ai relativi contenuti. Può essere impiegato per ottenere informazioni dettagliate sul bando, sul contesto normativo e sugli obiettivi dell'Unione Europea, dello Stato e della Regione. Utilizzalo per ottimizzare la tua strategia di risposta e per garantire la conformità con le linee guida e i requisiti specificati."
+        self.company_description = "Questo è uno strumento che assiste nella creazione di contenuti relativi all'azienda. Può essere utilizzato per rispondere a domande relative all'azienda."
+        self.response_sources = ""
+        self.model = gr.State('')
+        self.model = "gpt-4-turbo-preview"
+        self.colbert = gr.State('')
+        self.colbert = "No"
+        self.service_context = gr.State('')
+        self.indices = {}
+        self.index_needs_update = {"company": True, "tender": True}
+        self.status = ""
+        self.source_infor_results = []
+        self.file_tender_inform_datas = []
+        self.file_company_inform_datas = []
+        self.current_session_id = ''
+        self.session_list = []
+        self.doc_ids = {"company": [], "tender": []}
+        self.documents = []
+        self.ragatouille_pack = gr.State('')
+        self.company_doc_ids = []
+        self.tender_doc_ids = []
+        self.google_upload_url = ''
+        self.google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
+        self.chatting_mode_status = ""
+        self.chat_history = []
 
+        self.set_chatting_mode("Documents and Search")
+        self.set_model(self.model)
+        self.getSessionList()
 
-# Adding the Theme here ##
-WORDLIFT_THEME = gr.themes.Soft(
-    primary_hue=gr.themes.Color(
-        c50="#007AFF",
-        c100="rgba(0, 122, 255, 0.2)",
-        c200="#007AFF",
-        c300="rgba(0, 122, 255, 0.32)",
-        c400="rgba(0, 122, 255, 0.32)",
-        c500="rgba(0, 122, 255, 1.0)",
-        c600="rgba(0, 122, 255, 1.0)",
-        c700="rgba(0, 122, 255, 0.32)",
-        c800="rgba(0, 122, 255, 0.32)",
-        c900="#007AFF",
-        c950="#007AFF",
-    ),
-    secondary_hue=gr.themes.Color(
-        c50="#576b95",
-        c100="#576b95",
-        c200="#576b95",
-        c300="#576b95",
-        c400="#576b95",
-        c500="#576b95",
-        c600="#576b95",
-        c700="#576b95",
-        c800="#576b95",
-        c900="#576b95",
-        c950="#576b95",
-    ),
-    neutral_hue=gr.themes.Color(
-        name="gray",
-        c50="#f9fafb",
-        c100="#f3f4f6",
-        c200="#e5e7eb",
-        c300="#d1d5db",
-        c400="#B2B2B2",
-        c500="#808080",
-        c600="#636363",
-        c700="#515151",
-        c800="#393939",
-        c900="#272727",
-        c950="#171717",
-    ),
-    radius_size=gr.themes.sizes.radius_sm,
-).set(
-    button_primary_background_fill="#2196F3",
-    button_primary_background_fill_dark="#2196F3",
-    button_primary_background_fill_hover="#007AFF",
-    button_primary_border_color="#2196F3",
-    button_primary_border_color_dark="#2196F3",
-    button_primary_text_color="#FFFFFF",
-    button_primary_text_color_dark="#FFFFFF",
-    button_secondary_background_fill="#F2F2F2",
-    button_secondary_background_fill_dark="#2B2B2B",
-    button_secondary_text_color="#393939",
-    button_secondary_text_color_dark="#FFFFFF",
-    block_title_text_color="*primary_500",
-    block_title_background_fill="*primary_100",
-    input_background_fill="#F6F6F6",
-)
+    def set_prompt(self, prompt):
+        self.custom_prompt = PromptTemplate(prompt)
 
-template = '''
-Abbiamo fornito le informazioni di contesto di seguito: {context_str}
+    def set_description(self, name, tool_description: str):
+        if name == "tender_description":
+            self.tender_description = tool_description
+        elif name == "company_description":
+            self.company_description = tool_description
 
-Prendendo in considerazione queste informazioni e utilizzando le risorse online disponibili, ti preghiamo di effettuare una ricerca approfondita sull'argomento. Cerca dati, statistiche, studi, articoli, e qualsiasi altra fonte rilevante che possa arricchire la risposta.
+    def set_chatting_mode(self, value):
+        self.chatting_mode_status = value
 
-In qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire una sintesi delle informazioni trovate, citando le fonti. Assicurati di valutare la credibilità e l'attualità delle informazioni raccolte.
+    def set_model(self, _model):
+        if _model == 'gpt-4-turbo-preview':
+            _model = 'gpt-4-0125-preview'
+        self.model = _model
 
-Devi sempre rispondere in italiano e fornire risposte dettagliate e ben argomentate alle seguenti domande: {query_str}
+    def set_colbert(self, _colbert):
+        self.colbert = _colbert
+        self.initRAGatouille()
 
-Riassumi i punti chiave e le scoperte principali, includendo eventuali collegamenti diretti alle fonti online quando possibile.
-'''
-custom_prompt = PromptTemplate(template)
-tender_description = gr.State("")
-company_description = gr.State("")
-tender_description = "Questo è uno strumento che assiste nella redazione delle risposte relative al bando di gara ed ai relativi contenuti. Può essere impiegato per ottenere informazioni dettagliate sul bando, sul contesto normativo e sugli obiettivi dell'Unione Europea, dello Stato e della Regione. Utilizzalo per ottimizzare la tua strategia di risposta e per garantire la conformità con le linee guida e i requisiti specificati."
-company_description = "Questo è uno strumento che assiste nella creazione di contenuti relativi all'azienda. Può essere utilizzato per rispondere a domande relative all'azienda."
-response_sources = ""
-model = gr.State('')
-model = "gpt-4-turbo-preview"
-colbert = gr.State('')
-colbert = "No"
-openai.api_key = os.getenv("openai_key")
-service_context = gr.State('')
-indices = {}
-index_needs_update = {"company": True, "tender": True}
-status = ""
-source_infor_results = []
-google_api_key = os.getenv('google_search_key')
-GOOGLE_ENGINE_ID = os.getenv('google_engine_id')
-TAVILY_API_KEY = os.getenv('tavily_api_key')
-file_tender_inform_datas = []
-file_company_inform_datas = []
-current_session_id = ''
-session_list = []
-doc_ids = {"company": [], "tender": []}
-documents = []
-ragatouille_pack = gr.State('')
-company_doc_ids = []
-tender_doc_ids = []
-google_upload_url = ''
-google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
-
-def set_prompt(prompt):
-    global custom_prompt
-    custom_prompt = PromptTemplate(prompt)
-
-def set_description(name, tool_description: str):
-    global tender_description
-    global company_description
-    if name == "tender_description":
-        tender_description = tool_description
-    elif name == "company_description":
-        company_description = tool_description
-
-def set_chatting_mode(value):
-    global chatting_mode_status
-    chatting_mode_status = value
-
-def set_model(_model):
-    if _model == 'gpt-4-turbo-preview':
-        _model = 'gpt-4-0125-preview'
-    global model
-    model = _model
-
-def set_colbert(_colbert):
-    global colbert
-    colbert = _colbert
-    initRAGatouille()
-
-def getSessionList():
-    global current_session_id
-    global session_list
-    conn = sqlite3.connect("chat_history.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM session_history ORDER BY id DESC")
-    rows = cursor.fetchall()
-    session_list = []
-    temp = []
-    if len(rows) > 0:
-        last_id = rows[0][0]
-        if current_session_id == '':
-            current_session_id = last_id
-        for row in rows:
-            session_list.append(row[0])
-            temp.append([row[1]])
-    else:
-        temp.append(['No Data'])
-        gr.Info("You have to create Session")
-    conn.commit()
-    conn.close()
-    return temp
-
-set_chatting_mode("Documents and Search")
-set_model(model)
-getSessionList()
-
-def pdf_view_url():
-    pdf_viewer_html = f'<iframe src="file/assets/pdf_viewer.html" width="100%" height="470px"></iframe>'
-    return pdf_viewer_html
-
-def get_available_storage():
-    disk_usage = psutil.disk_usage('/')
-    available_storage_gb = disk_usage.free / (2**30)
-    return f"Available Storage: {available_storage_gb:.2f} GB"
-
-def get_tender_files_inform(directory_path):
-    global file_tender_inform_datas
-    if not os.path.exists(directory_path):
-        os.makedirs(directory_path)
-    files = os.listdir(directory_path)
-    if len(files) > 0:
-        load_or_update_index(f"./data/tender/{current_session_id}/", 'tender')
-    file_inform_data = []
-    file_tender_inform_datas = []
-    for file_number, file_name in enumerate(files, start=1):
-        file_inform_data = [file_name, "Delete"]
-        file_tender_inform_datas.append(file_inform_data)
-    if file_tender_inform_datas:
-        return file_tender_inform_datas
-    else:
-        return [['No File', ' ']]
-
-
-def get_company_files_inform(directory_path):
-    global file_company_inform_datas
-    if not os.path.exists(directory_path):
-        os.makedirs(directory_path)
-    files = os.listdir(directory_path)
-    if len(files) > 0:
-        load_or_update_index(f"./data/company/{current_session_id}/", 'company')
-    file_inform_data = []
-    file_company_inform_datas = []
-    for file_number, file_name in enumerate(files, start=1):
-        file_inform_data = [file_name, "Delete"]
-        file_company_inform_datas.append(file_inform_data)
-    if file_company_inform_datas:
-        return file_company_inform_datas
-    else:
-        return [['No File', ' ']]
-
-def load_index(directory_path, index_key):
-    global status
-    global doc_ids
-    documents = SimpleDirectoryReader(
-        directory_path, filename_as_id=True).load_data()
-    doc_ids[index_key] = [x.doc_id for x in documents]
-    # print(documents.id_)
-    status += f"loaded documents with {len(documents)} pages.\n"
-    if index_key in indices:
-        # If index already exists, just update it
-        status += f"Index for {index_key} loaded from memory.\n"
-        logging.info(f"Index for {index_key} loaded from memory.")
-        index = indices[index_key]
-    else:
-        try:
-            storage_context = StorageContext.from_defaults(
-                persist_dir=f"./storage/{index_key}"
-            )
-            index = load_index_from_storage(storage_context)
-            status += f"Index for {index_key} loaded from storage.\n"
-            logging.info(f"Index for {index_key} loaded from storage.")
-        except FileNotFoundError:
-            # If index not found, create a new one
-            logging.info(
-                f"Index for {index_key} not found. Creating a new one...")
-            index = VectorStoreIndex.from_documents(documents)
-            index.storage_context.persist(f"./storage/{index_key}")
-            status += f"New index for {index_key} created and persisted to storage.\n"
-            logging.info(
-                f"New index for {index_key} created and persisted to storage.")
-        # Save the loaded/created index in indices dict
-        indices[index_key] = index
-    index.refresh_ref_docs(documents)
-    index.storage_context.persist(f"./storage/{index_key}")
-    status += "Index refreshed and persisted to storage.\n"
-    logging.info("Index refreshed and persisted to storage.")
-    return index
-
-def check_or_create_directory(directory_path):
-    if not os.path.exists(directory_path):
-        os.makedirs(directory_path)
-
-def load_or_update_index(directory, index_key):
-    global indices
-    global index_needs_update
-    global status
-    print(get_available_storage())
-    if index_key not in index_needs_update or index_needs_update[index_key]:
-        indices[index_key] = load_index(directory, index_key)
-        index_needs_update[index_key] = False
-    else:
-        status += f"Index for {index_key} already up-to-date. No action taken.\n"
-    return indices[index_key]
-
-def initRAGatouille():
-    global documents
-    documents = []
-
-    directory_paths = [f"./data/tender/{current_session_id}", f"./data/company/{current_session_id}"]
-
-    for directory_path in directory_paths:
-        if os.path.isdir(directory_path):
-            try:
-                docs = SimpleDirectoryReader(directory_path, filename_as_id=True).load_data()
-                documents.extend(docs)
-            except Exception as e:
-                print(f"Error processing directory {directory_path}: {e}")
-                raise
+    def getSessionList(self):
+        conn = sqlite3.connect("chat_history.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM session_history ORDER BY id DESC")
+        rows = cursor.fetchall()
+        self.session_list = []
+        temp = []
+        if len(rows) > 0:
+            last_id = rows[0][0]
+            if self.current_session_id == '':
+                self.current_session_id = last_id
+            for row in rows:
+                self.session_list.append(row[0])
+                temp.append([row[1]])
         else:
-            print(f"Warning: Directory '{directory_path}' not found")
+            temp.append(['No Data'])
+            gr.Info("You have to create Session")
+        conn.commit()
+        conn.close()
+        return temp
 
-def upload_file(files, index_key):
-    global index_needs_update
-    global indices
-    global google_source_urls
-    global google_upload_url
-    gr.Info("Indexing(uploading...)Please check the Debug output")
-    directory_path = f"data/{index_key}/{current_session_id}"
-    check_or_create_directory(directory_path)
-    company = indices.get("company")
+    def get_tender_files_inform(self, directory_path):
+        if not os.path.exists(directory_path):
+            os.makedirs(directory_path)
+        files = os.listdir(directory_path)
+        if len(files) > 0:
+            self.load_or_update_index(f"./data/tender/{self.current_session_id}/", 'tender')
+        file_inform_data = []
+        self.file_tender_inform_datas = []
+        for file_number, file_name in enumerate(files, start=1):
+            file_inform_data = [file_name, "Delete"]
+            self.file_tender_inform_datas.append(file_inform_data)
+        if self.file_tender_inform_datas:
+            return self.file_tender_inform_datas
+        else:
+            return [['No File', ' ']]
 
-    for file in files:
-        destination_path = os.path.join(directory_path, os.path.basename(file.name))
-        shutil.move(file.name, destination_path)
 
-    if index_key == "url":
+    def get_company_files_inform(self, directory_path):
+        if not os.path.exists(directory_path):
+            os.makedirs(directory_path)
+        files = os.listdir(directory_path)
+        if len(files) > 0:
+            self.load_or_update_index(f"./data/company/{self.current_session_id}/", 'company')
+        file_inform_data = []
+        self.file_company_inform_datas = []
+        for file_number, file_name in enumerate(files, start=1):
+            file_inform_data = [file_name, "Delete"]
+            self.file_company_inform_datas.append(file_inform_data)
+        if self.file_company_inform_datas:
+            return self.file_company_inform_datas
+        else:
+            return [['No File', ' ']]
+
+    def load_index(self, directory_path, index_key):
+        documents = SimpleDirectoryReader(
+            directory_path, filename_as_id=True).load_data()
+        self.doc_ids[index_key] = [x.doc_id for x in documents]
+        # print(documents.id_)
+        self.status += f"loaded documents with {len(documents)} pages.\n"
+        if index_key in self.indices:
+            # If index already exists, just update it
+            self.status += f"Index for {index_key} loaded from memory.\n"
+            logging.info(f"Index for {index_key} loaded from memory.")
+            index = self.indices[index_key]
+        else:
+            try:
+                storage_context = StorageContext.from_defaults(
+                    persist_dir=f"./storage/{index_key}"
+                )
+                index = load_index_from_storage(storage_context)
+                self.status += f"Index for {index_key} loaded from storage.\n"
+                logging.info(f"Index for {index_key} loaded from storage.")
+            except FileNotFoundError:
+                # If index not found, create a new one
+                logging.info(
+                    f"Index for {index_key} not found. Creating a new one...")
+                index = VectorStoreIndex.from_documents(documents)
+                index.storage_context.persist(f"./storage/{index_key}")
+                self.status += f"New index for {index_key} created and persisted to storage.\n"
+                logging.info(
+                    f"New index for {index_key} created and persisted to storage.")
+            # Save the loaded/created index in indices dict
+            self.indices[index_key] = index
+        index.refresh_ref_docs(documents)
+        index.storage_context.persist(f"./storage/{index_key}")
+        self.status += "Index refreshed and persisted to storage.\n"
+        logging.info("Index refreshed and persisted to storage.")
+        return index
+
+
+
+    def load_or_update_index(self, directory, index_key):
+        print(get_available_storage())
+        if index_key not in self.index_needs_update or self.index_needs_update[index_key]:
+            self.indices[index_key] = self.load_index(directory, index_key)
+            self.index_needs_update[index_key] = False
+        else:
+            self.status += f"Index for {index_key} already up-to-date. No action taken.\n"
+        return self.indices[index_key]
+
+    def initRAGatouille(self):
+        self.documents = []
+
+        directory_paths = [f"./data/tender/{self.current_session_id}", f"./data/company/{self.current_session_id}"]
+
+        for directory_path in directory_paths:
+            if os.path.isdir(directory_path):
+                try:
+                    docs = SimpleDirectoryReader(directory_path, filename_as_id=True).load_data()
+                    self.documents.extend(docs)
+                except Exception as e:
+                    print(f"Error processing directory {directory_path}: {e}")
+                    raise
+            else:
+                print(f"Warning: Directory '{directory_path}' not found")
+
+    def upload_file(self, files, index_key):
+        gr.Info("Indexing(uploading...)Please check the Debug output")
+        directory_path = f"data/{index_key}/{self.current_session_id}"
+        check_or_create_directory(directory_path)
+        company = self.indices.get("company")
+
+        for file in files:
+            destination_path = os.path.join(directory_path, os.path.basename(file.name))
+            shutil.move(file.name, destination_path)
+
+        if index_key == "url":
+            file_list = os.listdir(directory_path)
+            for file_name in file_list:
+                file_path = os.path.join(directory_path, file_name)
+                if os.path.isfile(file_path):
+                    with open(file_path, 'r') as file:
+                        file_content = file.read()
+                        self.google_source_urls = []
+                        value = file_content.strip().split('\n')
+                        value = value[:10]
+                        for val in value:
+                            self.google_upload_url += f"siteSearch={val}&"
+                        if len(value) < 10:
+                            value.extend(['No data'] * (10 - len(value)))
+                        self.google_source_urls.append(['question']+value)
+            print(self.google_source_urls)
+            google_spec = GoogleSearchToolSpec(key=GOOGLE_API_KEY, engine=GOOGLE_ENGINE_ID, num=1)
+            if self.google_source_urls[0][0] != 'No data':
+                for search_url in self.google_source_urls[0][1:]:
+                    if search_url == 'No data':
+                        break
+                    search_results = google_spec.google_search(search_url)
+
+                    for result in search_results:
+                        result_dict = json.loads(result.text)
+                        snippet = result_dict['items'][0]['snippet']
+                        node = Document(text=snippet)
+                        company.insert_nodes([node])
+                    print("The Google search result has been successfully inserted.")
+        else:
+            self.index_needs_update[index_key] = True
+            self.load_or_update_index(directory_path, index_key)
+            gr.Info("Documents are indexed")
+        return "Files uploaded successfully!!!"
+
+    def clear_chat_history(self):
+        self.chat_history = []
+        self.google_soucre_urls = [['No data', 'No data', 'No data', 'No data', 'No data','No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
+        delete_chat_history(self.current_session_id)
+        self.current_session_id = ''
+        directory_path = f"./temp/"
+        if os.path.exists(directory_path):
+            shutil.rmtree(directory_path)
+        return gr.update(value=get_chat_history(self.current_session_id))
+
+
+    async def bot(self, history, messages_history):
+        if self.current_session_id == '':
+            gr.Info("You have to create new session")
+            return
+        try:
+            if openai.api_key == "":
+                gr.Warning("Invalid OpenAI API key.")
+                raise ValueError("Invalid OpenAI API key.")
+            loaded_history = get_chat_history(self.current_session_id)
+            history_message = []
+            for history_data in loaded_history[-min(5, len(loaded_history)):]:
+                history_message.append(ChatMessage(role="user", content=history_data[0]))
+                history_message.append(ChatMessage(role="assistant", content=history_data[1]))
+
+            try:
+                company = self.indices.get("company")
+                tender = self.indices.get("tender")
+            except Exception as e:
+                if str(e) == "expected string or bytes-like object":
+                    gr.Warning(
+                        "Please enter a valid OpenAI API key or set the env key.")
+                    yield "Please enter a valid OpenAI API key or set the env key."
+                yield "Index not found. Please upload the files first."
+            tools = []
+            message = history[-1][0]
+            if self.chatting_mode_status == "Only Document":
+                if tender is None and company is None:
+                    gr.Warning("Index not found. Please upload the files first.")
+                    yield "Index not found. Please upload the files first."
+
+                elif tender is None:
+                    company_query_engine = company.as_query_engine(
+                        similarity_top_k=10)
+                    tools = [
+                        QueryEngineTool(
+                            query_engine=company_query_engine,
+                            metadata=ToolMetadata(
+                                name='company_index',
+                                description=f'{self.company_description}'
+                            ))]
+                elif company is None:
+                    tender_query_engine = tender.as_query_engine(
+                        similarity_top_k=10)
+                    tools = [QueryEngineTool(
+                        query_engine=tender_query_engine,
+                        metadata=ToolMetadata(
+                            name='tender_index',
+                            description=f'{self.tender_description}'
+                        ))]
+                else:
+                    tender_query_engine = tender.as_query_engine(
+                        similarity_top_k=10)
+                    company_query_engine = company.as_query_engine(
+                        similarity_top_k=10)
+                    tools = [QueryEngineTool(
+                        query_engine=tender_query_engine,
+                        metadata=ToolMetadata(
+                            name='tender_index',
+                            description=f'{self.tender_description}'
+                        )),
+                        QueryEngineTool(
+                        query_engine=company_query_engine,
+                        metadata=ToolMetadata(
+                            name='company_index',
+                            description=f'{self.company_description}'
+                        ))]
+                agent = OpenAIAgent.from_tools(
+                    tools, verbose=True, prompt=custom_prompt)
+                if history_message:
+                    agent.memory.set(history_message)
+                qa_message = f"{message}.Devi rispondere in italiano."
+                if self.colbert == 'No':
+                    response = agent.stream_chat(qa_message)
+                    if response.sources:
+                        self.response_sources = response.source_nodes
+                        stream_token = ""
+                        for token in response.response_gen:
+                            stream_token += token
+                            yield history, messages_history
+                        if stream_token and message:
+                            add_chat_history(
+                                f"#{len(self.source_infor_results)}:{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
+                    else:
+                        history_message = []
+                        self.response_sources = "No sources found."
+                        qa_message = f"({message}). Devi rispondere in italiano. "
+                        history_message.append({"role": "user", "content": qa_message})
+                        content = self.openai_agent(history_message)
+
+                        partial_message = ""
+                        for chunk in content:
+                            if chunk.choices[0].delta.content:
+                                partial_message = partial_message + \
+                                    chunk.choices[0].delta.content
+                                yield history, messages_history
+                        if partial_message and message:
+                            add_chat_history(
+                                f"{message}::::{partial_message}", "no_data", self.current_session_id)
+                else:
+                    ragatouille_pack = RAGatouilleRetrieverPack(
+                        self.documents,
+                        llm=OpenAI(model='gpt-4-1106-preview'),
+                        index_name="my_index",
+                        top_k=5
+                    )
+                    response = ragatouille_pack.run(qa_message)
+
+                    stream_token = ""
+                    for token in str(response):
+                        stream_token += token
+                        yield history, messages_history
+                    if stream_token and message:
+                        add_chat_history(
+                            f"#{len(self.source_infor_results)}:{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
+
+            elif self.chatting_mode_status == "Documents and Search":
+                tavily_tool = TavilyToolSpec(
+                    api_key=TAVILY_API_KEY,
+                )
+                tavily_tool_list = tavily_tool.to_tool_list()
+                if tender is None and company is None:
+                    gr.Warning("Index not found. Please upload the files first.")
+                    yield "Index not found. Please upload the files first."
+                elif tender is None:
+                    company_query_engine = company.as_query_engine(
+                        similarity_top_k=10)
+                    tools = [
+                        QueryEngineTool(
+                            query_engine=company_query_engine,
+                            metadata=ToolMetadata(
+                                name='company_index',
+                                description=f'{self.company_description}'
+                            ))]
+                elif company is None:
+                    tender_query_engine = tender.as_query_engine(
+                        similarity_top_k=10)
+                    tools = [QueryEngineTool(
+                        query_engine=tender_query_engine,
+                        metadata=ToolMetadata(
+                            name='tender_index',
+                            description=f'{self.tender_description}'
+                        ))]
+                else:
+                    tender_query_engine = tender.as_query_engine(
+                        temperature=0.5,
+                        similarity_top_k=10)
+                    company_query_engine = company.as_query_engine(
+                        temperature=0.5,
+                        similarity_top_k=10)
+                    tools = [QueryEngineTool(
+                        query_engine=tender_query_engine,
+                        metadata=ToolMetadata(
+                            name='tender_index',
+                            description=f'{self.tender_description}'
+                        )),
+                        QueryEngineTool(
+                        query_engine=company_query_engine,
+                        metadata=ToolMetadata(
+                            name='company_index',
+                            description=f'{self.company_description}'
+                        ))]
+                tools.extend(tavily_tool_list)
+                agent = OpenAIAgent.from_tools(tools, verbose=True, prompt=self.custom_prompt)
+                
+                # if history_message:
+                #     qa_message=f"Devi rispondere in italiano."
+                #     history_message.append({"role": "user", "content": qa_message})
+                #     agent.memory.set(history_message)
+                
+                qa_message = f":{message}. Devi rispondere in italiano."
+                response = agent.stream_chat(qa_message)
+                
+                if self.colbert == 'No':
+                    response = agent.stream_chat(qa_message)
+                    stream_token = ""
+                    if response.source_nodes:
+                        self.response_sources = response.source_nodes
+                    else:
+                        self.response_sources = "No sources found."
+
+                    for token in response.response_gen:
+                        stream_token += token
+                        yield history, messages_history
+
+                    if stream_token and message:
+                        add_chat_history(
+                            f"#{len(self.source_infor_results)}:{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
+                else:
+                    ragatouille_pack = RAGatouilleRetrieverPack(
+                        self.documents,
+                        llm=OpenAI(model='gpt-4-1106-preview'),
+                        index_name="my_index",
+                        top_k=5
+                    )
+                    response = ragatouille_pack.run(qa_message)
+
+                    stream_token = ""
+                    for token in str(response):
+                        stream_token += token
+                        yield history, messages_history
+                    if stream_token and message:
+                        add_chat_history(
+                            f"#{len(self.source_infor_results)}:{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
+            else:
+                history_message = []
+                for history_data in loaded_history[-min(5, len(loaded_history)):]:
+                    history_message.append(
+                        {"role": "user", "content": history_data[0]})
+                    history_message.append(
+                        {"role": "assistant", "content": history_data[1]})
+
+                history_message.append({"role": "user", "content": message})
+                qa_message = f"Devi rispondere in italiano."
+                history_message.append({"role": "user", "content": qa_message})
+                content = self.openai_agent(history_message)
+
+                partial_message = ""
+                for chunk in content:
+                    if chunk.choices[0].delta.content:
+                        partial_message = partial_message + \
+                            chunk.choices[0].delta.content
+                        yield history, messages_history
+                if partial_message and message:
+                    add_chat_history(
+                        f"{message}::::{partial_message}", "no_data", self.current_session_id)
+
+        except ValueError as e:
+            gr.Warning(str(e))
+
+    def update_debug_info(self, upload_file):
+        debug_info = self.status
+        return debug_info
+
+    def update_source_info(self):
+        source_info = "Sources: \n"
+        if self.response_sources == "No sources found.":
+            return source_info
+        else:
+            for node_with_score in self.response_sources:
+                node = node_with_score.node
+                text = node.text
+                extra_info = node.extra_info or {}
+                file_name = extra_info.get("file_name")
+                page_label = extra_info.get("page_label")
+                source_info += f"File Name: {file_name}\n, Page Label: {page_label}\n\n"
+            return source_info
+        
+    def update_url_info(self):
+        directory_path = f"data/url/{self.current_session_id}"
+        if not os.path.exists(directory_path):
+            os.makedirs(directory_path)
+        self.google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
+                        'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
         file_list = os.listdir(directory_path)
         for file_name in file_list:
             file_path = os.path.join(directory_path, file_name)
             if os.path.isfile(file_path):
                 with open(file_path, 'r') as file:
                     file_content = file.read()
-                    google_source_urls = []
+                    self.google_source_urls = []
                     value = file_content.strip().split('\n')
                     value = value[:10]
                     for val in value:
-                        google_upload_url += f"siteSearch={val}&"
+                        self.google_upload_url += f"siteSearch={val}&"
                     if len(value) < 10:
                         value.extend(['No data'] * (10 - len(value)))
-                    google_source_urls.append(['question']+value)
-        print(google_source_urls)
-        google_spec = GoogleSearchToolSpec(key=google_api_key, engine=GOOGLE_ENGINE_ID, num=1)
-        if google_source_urls[0][0] != 'No data':
-            for search_url in google_source_urls[0][1:]:
-                if search_url == 'No data':
-                    break
-                search_results = google_spec.google_search(search_url)
+                    self.google_source_urls.append(['question']+value)
 
-                for result in search_results:
-                    result_dict = json.loads(result.text)
-                    snippet = result_dict['items'][0]['snippet']
-                    node = Document(text=snippet)
-                    company.insert_nodes([node])
-                print("The Google search result has been successfully inserted.")
-    else:
-        index_needs_update[index_key] = True
-        load_or_update_index(directory_path, index_key)
-        gr.Info("Documents are indexed")
-    return "Files uploaded successfully!!!"
-
-chat_history = []
-
-def get_chat_history():
-    conn = sqlite3.connect("chat_history.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT chat_history
-        FROM chat_history
-        WHERE session_id = ?
-        ORDER BY id
-    """, (current_session_id,))
-    rows = cursor.fetchall()
-    chat_history = []
-    if rows:
-        for row in rows:
-            chat_history.append(list(row[0].split("::::")))
-    conn.close()
-    return chat_history
-
-
-def write_chat_history_to_db(value, source_inform):
-    conn = sqlite3.connect("chat_history.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO chat_history(chat_history,source_inform,session_id) VALUES (?,?,?)", (value, source_inform, current_session_id))
-    conn.commit()
-    conn.close()
-
-
-def clear_chat_history():
-    global current_session_id
-    global chat_history
-    global google_source_urls
-    chat_history = []
-    google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data','No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
-    conn = sqlite3.connect("chat_history.db")
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM chat_history WHERE session_id = ?",
-                   (current_session_id,))
-    cursor_1 = conn.cursor()
-    cursor_1.execute("DELETE FROM session_history WHERE id = ?",
-                     (current_session_id,))
-    conn.commit()
-    conn.close()
-    current_session_id = ''
-    directory_path = f"./temp/"
-    if os.path.exists(directory_path):
-        shutil.rmtree(directory_path)
-    return gr.update(value=get_chat_history())
-
-
-async def bot(history, messages_history):
-    if current_session_id == '':
-        gr.Info("You have to create new session")
-        return
-    try:
-        global response_sources
-        global indices
-        global google_source_urls
-        global google_upload_url
-
-        if openai.api_key == "":
-            gr.Warning("Invalid OpenAI API key.")
-            raise ValueError("Invalid OpenAI API key.")
-        loaded_history = get_chat_history()
-        history_message = []
-        for history_data in loaded_history[-min(5, len(loaded_history)):]:
-            history_message.append(ChatMessage(role="user", content=history_data[0]))
-            history_message.append(ChatMessage(role="assistant", content=history_data[1]))
-
-        try:
-            company = indices.get("company")
-            tender = indices.get("tender")
-        except Exception as e:
-            if str(e) == "expected string or bytes-like object":
-                gr.Warning(
-                    "Please enter a valid OpenAI API key or set the env key.")
-                yield "Please enter a valid OpenAI API key or set the env key."
-            yield "Index not found. Please upload the files first."
-        tools = []
-        message = history[-1][0]
-        if chatting_mode_status == "Only Document":
-            if tender is None and company is None:
-                gr.Warning("Index not found. Please upload the files first.")
-                yield "Index not found. Please upload the files first."
-
-            elif tender is None:
-                company_query_engine = company.as_query_engine(
-                    similarity_top_k=10)
-                tools = [
-                    QueryEngineTool(
-                        query_engine=company_query_engine,
-                        metadata=ToolMetadata(
-                            name='company_index',
-                            description=f'{company_description}'
-                        ))]
-            elif company is None:
-                tender_query_engine = tender.as_query_engine(
-                    similarity_top_k=10)
-                tools = [QueryEngineTool(
-                    query_engine=tender_query_engine,
-                    metadata=ToolMetadata(
-                        name='tender_index',
-                        description=f'{tender_description}'
-                    ))]
-            else:
-                tender_query_engine = tender.as_query_engine(
-                    similarity_top_k=10)
-                company_query_engine = company.as_query_engine(
-                    similarity_top_k=10)
-                tools = [QueryEngineTool(
-                    query_engine=tender_query_engine,
-                    metadata=ToolMetadata(
-                        name='tender_index',
-                        description=f'{tender_description}'
-                    )),
-                    QueryEngineTool(
-                    query_engine=company_query_engine,
-                    metadata=ToolMetadata(
-                        name='company_index',
-                        description=f'{company_description}'
-                    ))]
-            agent = OpenAIAgent.from_tools(
-                tools, verbose=True, prompt=custom_prompt)
-            if history_message:
-                agent.memory.set(history_message)
-            qa_message = f"{message}.Devi rispondere in italiano."
-            if colbert == 'No':
-                response = agent.stream_chat(qa_message)
-                if response.sources:
-                    response_sources = response.source_nodes
-                    stream_token = ""
-                    for token in response.response_gen:
-                        stream_token += token
-                        yield history, messages_history
-                    if stream_token and message:
-                        write_chat_history_to_db(
-                            f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
-                else:
-                    history_message = []
-                    response_sources = "No sources found."
-                    qa_message = f"({message}). Devi rispondere in italiano. "
-                    history_message.append({"role": "user", "content": qa_message})
-                    content = openai_agent(history_message)
-
-                    partial_message = ""
-                    for chunk in content:
-                        if chunk.choices[0].delta.content:
-                            partial_message = partial_message + \
-                                chunk.choices[0].delta.content
-                            yield history, messages_history
-                    if partial_message and message:
-                        write_chat_history_to_db(
-                            f"{message}::::{partial_message}", "no_data")
-            else:
-                ragatouille_pack = RAGatouilleRetrieverPack(
-                    documents,
-                    llm=OpenAI(model='gpt-4-1106-preview'),
-                    index_name="my_index",
-                    top_k=5
-                )
-                response = ragatouille_pack.run(qa_message)
-
-                stream_token = ""
-                for token in str(response):
-                    stream_token += token
-                    yield history, messages_history
-                if stream_token and message:
-                    write_chat_history_to_db(
-                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
-
-        elif chatting_mode_status == "Documents and Search":
-            tavily_tool = TavilyToolSpec(
-                api_key=TAVILY_API_KEY,
-            )
-            tavily_tool_list = tavily_tool.to_tool_list()
-            if tender is None and company is None:
-                gr.Warning("Index not found. Please upload the files first.")
-                yield "Index not found. Please upload the files first."
-            elif tender is None:
-                company_query_engine = company.as_query_engine(
-                    similarity_top_k=10)
-                tools = [
-                    QueryEngineTool(
-                        query_engine=company_query_engine,
-                        metadata=ToolMetadata(
-                            name='company_index',
-                            description=f'{company_description}'
-                        ))]
-            elif company is None:
-                tender_query_engine = tender.as_query_engine(
-                    similarity_top_k=10)
-                tools = [QueryEngineTool(
-                    query_engine=tender_query_engine,
-                    metadata=ToolMetadata(
-                        name='tender_index',
-                        description=f'{tender_description}'
-                    ))]
-            else:
-                tender_query_engine = tender.as_query_engine(
-                    temperature=0.5,
-                    similarity_top_k=10)
-                company_query_engine = company.as_query_engine(
-                    temperature=0.5,
-                    similarity_top_k=10)
-                tools = [QueryEngineTool(
-                    query_engine=tender_query_engine,
-                    metadata=ToolMetadata(
-                        name='tender_index',
-                        description=f'{tender_description}'
-                    )),
-                    QueryEngineTool(
-                    query_engine=company_query_engine,
-                    metadata=ToolMetadata(
-                        name='company_index',
-                        description=f'{company_description}'
-                    ))]
-            tools.extend(tavily_tool_list)
-            agent = OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
-            
-            # if history_message:
-            #     qa_message=f"Devi rispondere in italiano."
-            #     history_message.append({"role": "user", "content": qa_message})
-            #     agent.memory.set(history_message)
-            
-            qa_message = f":{message}. Devi rispondere in italiano."
-            response = agent.stream_chat(qa_message)
-            # if not response.source_nodes or response.source_nodes is None:
-            # google_spec = GoogleSearchToolSpec(key=google_api_key, engine=GOOGLE_ENGINE_ID, num=1)
-            # search_results = google_spec.google_search(message)
-            # for result in search_results:
-            #     result_dict = json.loads(result.text)
-            #     snippet = result_dict['items'][0]['snippet']
-            #     node = Document(text=snippet)
-            #     company.insert_nodes([node])
-            # print("======> Did google search")
-            
-            if colbert == 'No':
-                response = agent.stream_chat(qa_message)
-                stream_token = ""
-                if response.source_nodes:
-                    response_sources = response.source_nodes
-                else:
-                    response_sources = "No sources found."
-
-                for token in response.response_gen:
-                    stream_token += token
-                    yield history, messages_history
-
-                if stream_token and message:
-                    write_chat_history_to_db(
-                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
-            else:
-                ragatouille_pack = RAGatouilleRetrieverPack(
-                    documents,
-                    llm=OpenAI(model='gpt-4-1106-preview'),
-                    index_name="my_index",
-                    top_k=5
-                )
-                response = ragatouille_pack.run(qa_message)
-
-                stream_token = ""
-                for token in str(response):
-                    stream_token += token
-                    yield history, messages_history
-                if stream_token and message:
-                    write_chat_history_to_db(
-                        f"#{len(source_infor_results)}:{message}::::{stream_token}", get_source_info())
-        else:
-            history_message = []
-            for history_data in loaded_history[-min(5, len(loaded_history)):]:
-                history_message.append(
-                    {"role": "user", "content": history_data[0]})
-                history_message.append(
-                    {"role": "assistant", "content": history_data[1]})
-
-            history_message.append({"role": "user", "content": message})
-            qa_message = f"Devi rispondere in italiano."
-            history_message.append({"role": "user", "content": qa_message})
-            content = openai_agent(history_message)
-
-            partial_message = ""
-            for chunk in content:
-                if chunk.choices[0].delta.content:
-                    partial_message = partial_message + \
-                        chunk.choices[0].delta.content
-                    yield history, messages_history
-            if partial_message and message:
-                write_chat_history_to_db(
-                    f"{message}::::{partial_message}", "no_data")
-
-    except ValueError as e:
-        gr.Warning(str(e))
-
-def update_debug_info(upload_file):
-    debug_info = status
-    return debug_info
-
-def update_source_info():
-    global response_sources
-    source_info = "Sources: \n"
-    if response_sources == "No sources found.":
-        return source_info
-    else:
-        for node_with_score in response_sources:
-            node = node_with_score.node
-            text = node.text
-            extra_info = node.extra_info or {}
-            file_name = extra_info.get("file_name")
-            page_label = extra_info.get("page_label")
-            source_info += f"File Name: {file_name}\n, Page Label: {page_label}\n\n"
-        return source_info
-    
-def update_url_info():
-    global google_source_urls
-    global google_upload_url
-    directory_path = f"data/url/{current_session_id}"
-    if not os.path.exists(directory_path):
-        os.makedirs(directory_path)
-    google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
-                       'No data', 'No data', 'No data', 'No data', 'No data', 'No data']]
-    file_list = os.listdir(directory_path)
-    for file_name in file_list:
-        file_path = os.path.join(directory_path, file_name)
-        if os.path.isfile(file_path):
-            with open(file_path, 'r') as file:
-                file_content = file.read()
-                google_source_urls = []
-                value = file_content.strip().split('\n')
-                value = value[:10]
-                for val in value:
-                    google_upload_url += f"siteSearch={val}&"
-                if len(value) < 10:
-                    value.extend(['No data'] * (10 - len(value)))
-                google_source_urls.append(['question']+value)
-
-def update_source():
-    global response_sources
-    global source_infor_results
-    source_infor_results = []
-    conn = sqlite3.connect("chat_history.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT *
-        FROM chat_history
-        WHERE session_id = ?
-        ORDER BY id
-    """, (current_session_id,))
-    rows = cursor.fetchall()
-    source_informs = []
-    if rows:
-        for row in rows:
-            if row[2] != "no_data":
-                temp = list(row[2].split("&&&&"))
-                temp.append(list(row[1].split("::::"))[0])
-                source_informs.append(temp)
-    if source_informs:
-        for source_inform in source_informs:
-            for temp in source_inform[:-2]:
-                temp_1 = list(temp.split("::::"))
-                temp_1.append(source_inform[-1])
-                source_infor_results.append(temp_1)
-        conn.close()
-        final_result = []
-        for result in source_infor_results:
-            temp = []
-            temp.append(result[-1])
-            temp.append(result[0])
-            temp.append(result[1])
-            final_result.append(temp)
-        if final_result:
-            return final_result
-        else:
-            return [['No Data', 'No Data', 'No Data']]
-    else:
-        return [['No Data', 'No Data', 'No Data']]
-
-
-def get_source_info():
-    global response_sources
-    source_info = ""
-    if response_sources == "No sources found.":
-        return source_info
-    else:
-        for node_with_score in response_sources:
-            node = node_with_score.node
-            text = node.text
-            extra_info = node.extra_info or {}
-            file_name = extra_info.get("file_name")
-            page_label = extra_info.get("page_label")
-            source_info += f"{file_name}::::{page_label}::::{text}&&&&"
-        return source_info
-
-
-def delete_index(index_key):
-    if openai.api_key:
-        gr.Info("Deleting index..")
-        global status
-        directory_path = f"./storage/{index_key}/{current_session_id}"
-        backup_path = f"./backup_path/{index_key}/{current_session_id}"
-        documents_path = f"data/{index_key}/{current_session_id}"
-        if not os.path.exists(directory_path):
-            os.makedirs(directory_path)
-        if not os.path.exists(documents_path):
-            os.makedirs(documents_path)
-        if not os.path.exists(backup_path):
-            os.makedirs(backup_path)
-        for filename in os.listdir(documents_path):
-            source_file = os.path.join(documents_path, filename)
-            destination_file = os.path.join(backup_path, filename)
-            shutil.move(source_file, destination_file)
-        shutil.rmtree(directory_path)
-        shutil.rmtree(documents_path)
-
-        for item in doc_ids[index_key]:
-            indices[index_key].delete_ref_doc(item, delete_from_docstore=True)
-
-        status = ""
-        gr.Info("Index is deleted")
-        debug_info = status
-        return debug_info
-    else:
-        return None
-
-
-def delete_row(index_key, file_name):
-    global doc_ids
-    current_datetime = datetime.now().timestamp()
-    if openai.api_key:
-        gr.Info("Deleting index..")
-        backup_path = f"./backup_path/{index_key}/{current_session_id}/{current_datetime}"
-        index_path = f"./storage/{current_session_id}/{index_key}"
-        documents_path = f"./data/{index_key}/{current_session_id}/{file_name}"
-        directory_path = f"data/{index_key}/{current_session_id}"
-        if not os.path.exists(documents_path):
-            os.makedirs(documents_path)
-        if not os.path.exists(backup_path):
-            os.makedirs(backup_path)
-        if not os.path.exists(index_path):
-            os.makedirs(index_path)
-        shutil.move(documents_path, backup_path)
-        shutil.rmtree(index_path)
-
-        string_to_match = f'data\\{index_key}\\{current_session_id}\\{file_name}'
-        filtered_list = [item for item in doc_ids[index_key]
-                         if item.startswith(string_to_match)]
-        for item in filtered_list:
-            indices[index_key].delete_ref_doc(item, delete_from_docstore=True)
-        id = indices[index_key].index_id
-        status = ""
-        gr.Info("Index is deleted")
-        debug_info = status
-        return debug_info
-    else:
-        return None
-
-def get_sources(choice):
-    if choice == "view source":
-        return gr.Textbox.update(value=response_sources)
-
-def set_openai_api_key(api_key: str):
-    if api_key:
-        openai.api_key = api_key
-        os.environ["OPENAI_API_KEY"] = api_key
-        llm_predictor = LLMPredictor(llm=ChatOpenAI(
-            temperature=0, model_name=model, streaming=True))
-        global service_context
-        service_context = ServiceContext.from_defaults(
-            llm_predictor=llm_predictor, chunk_size=1024)
-    else:
-        gr.Warning("Please enter a valid OpenAI API key or set the env key.")
-
-def openai_agent(prompt):
-    response = openai.chat.completions.create(
-        model=model,
-        messages=prompt,
-        temperature=1.0,
-        stream=True
-    )
-    return response
-
-def update_company_info(upload_file):
-    file_value = get_company_files_inform(directory_path=f"data/company/{current_session_id}")
-    return gr.update(value=file_value)
-
-def update_tender_info(upload_file):
-    file_value = get_tender_files_inform(directory_path=f"data/tender/{current_session_id}")
-    return gr.update(value=file_value)
-
-def set_tender_pdf(evt: gr.SelectData):
-    select_data = evt.index
-    if select_data[1] == 0:
-        pdf_viewer_content = f'<iframe src="file/data/tender/{current_session_id}/{evt.value}" width="100%" height="600px"></iframe>'
-        file_path = search_files_by_name("./data", evt.value)
-        webbrowser.open(file_path)
-        return gr.update(value=pdf_viewer_content)
-    else:
-        delete_row("tender", file_tender_inform_datas[int(select_data[0])][0])
-
-def set_company_pdf(evt: gr.SelectData):
-    select_data = evt.index
-    if select_data[1] == 0:
-        pdf_viewer_content = f'<iframe src="file/data/company/{current_session_id}/{evt.value}" width="100%" height="600px"></iframe>'
-        file_path = search_files_by_name("./data", evt.value)
-        webbrowser.open(file_path)
-        return gr.update(value=pdf_viewer_content)
-    else:
-        delete_row(
-            "company", file_company_inform_datas[int(select_data[0])][0])
-
-def set_source_pdf(evt: gr.SelectData):
-    pdf_viewer_content = f'<iframe src="file/data/company/{evt.value}" width="100%" height="800px"></iframe>'
-    return gr.update(value=pdf_viewer_content)
-
-def set_highlight_pdf(evt: gr.SelectData):
-    select_data = evt.index
-    file_name = source_infor_results[int(select_data[0])][0]
-    source_text = source_infor_results[int(select_data[0])][2]
-    file_path = search_files_by_name("./data", file_name)
-    webbrowser.open(file_path)
-    pdf_viewer_content = f'<h4>{source_text}</h4>'
-    return gr.update(value=pdf_viewer_content)
-
-def search_files_by_name(root_dir, file_name):
-    for foldername, subfolders, filenames in os.walk(root_dir):
-        for filename in filenames:
-            if filename == file_name:
-                return os.path.join(foldername, filename)
-
-def update_session(update_data):
-    old_session = getSessionList()
-    new_session = update_data.values
-    for i in range(min(len(new_session), len(old_session))):
-        nested_list1 = new_session[i]
-        nested_list2 = old_session[i]
-        str1 = str(nested_list1)
-        str2 = str(nested_list2)
-        if str1 != str2:
-            conn = sqlite3.connect("chat_history.db")
-            cursor = conn.cursor()
-            cursor.execute("UPDATE session_history SET session_title = ? WHERE id = ?;",
-                           (nested_list1[0], session_list[i]))
-            conn.commit()
-            conn.close()
-
-def add_session(session_title):
-    if session_title:
-        global current_session_id
+    def update_source(self):
+        self.source_infor_results = []
         conn = sqlite3.connect("chat_history.db")
         cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO session_history(session_title) VALUES (?)", (session_title,))
-        current_session_id = cursor.lastrowid
-        current_session_id
-        conn.commit()
-        conn.close()
-        return gr.update(value=getSessionList())
-    else:
-        gr.Info("You have to input Sesstion title")
-        return gr.update(value=getSessionList())
+        cursor.execute("""
+            SELECT *
+            FROM chat_history
+            WHERE session_id = ?
+            ORDER BY id
+        """, (self.current_session_id,))
+        rows = cursor.fetchall()
+        source_informs = []
+        if rows:
+            for row in rows:
+                if row[2] != "no_data":
+                    temp = list(row[2].split("&&&&"))
+                    temp.append(list(row[1].split("::::"))[0])
+                    source_informs.append(temp)
+        if source_informs:
+            for source_inform in source_informs:
+                for temp in source_inform[:-2]:
+                    temp_1 = list(temp.split("::::"))
+                    temp_1.append(source_inform[-1])
+                    self.source_infor_results.append(temp_1)
+            conn.close()
+            final_result = []
+            for result in self.source_infor_results:
+                temp = []
+                temp.append(result[-1])
+                temp.append(result[0])
+                temp.append(result[1])
+                final_result.append(temp)
+            if final_result:
+                return final_result
+            else:
+                return [['No Data', 'No Data', 'No Data']]
+        else:
+            return [['No Data', 'No Data', 'No Data']]
 
-def set_session(evt: gr.SelectData):
-    global current_session_id
-    select_data = evt.index
-    current_session_id = session_list[int(select_data[0])]
+
+    def get_source_info(self):
+        source_info = ""
+        if self.response_sources == "No sources found.":
+            return source_info
+        else:
+            for node_with_score in self.response_sources:
+                node = node_with_score.node
+                text = node.text
+                extra_info = node.extra_info or {}
+                file_name = extra_info.get("file_name")
+                page_label = extra_info.get("page_label")
+                source_info += f"{file_name}::::{page_label}::::{text}&&&&"
+            return source_info
+
+
+    def delete_index(self, index_key):
+        if openai.api_key:
+            gr.Info("Deleting index..")
+            directory_path = f"./storage/{index_key}/{self.current_session_id}"
+            backup_path = f"./backup_path/{index_key}/{self.current_session_id}"
+            documents_path = f"data/{index_key}/{self.current_session_id}"
+            if not os.path.exists(directory_path):
+                os.makedirs(directory_path)
+            if not os.path.exists(documents_path):
+                os.makedirs(documents_path)
+            if not os.path.exists(backup_path):
+                os.makedirs(backup_path)
+            for filename in os.listdir(documents_path):
+                source_file = os.path.join(documents_path, filename)
+                destination_file = os.path.join(backup_path, filename)
+                shutil.move(source_file, destination_file)
+            shutil.rmtree(directory_path)
+            shutil.rmtree(documents_path)
+
+            for item in self.doc_ids[index_key]:
+                self.indices[index_key].delete_ref_doc(item, delete_from_docstore=True)
+
+            self.status = ""
+            gr.Info("Index is deleted")
+            debug_info = self.status
+            return debug_info
+        else:
+            return None
+
+
+    def delete_row(self, index_key, file_name):
+        current_datetime = datetime.now().timestamp()
+        if openai.api_key:
+            gr.Info("Deleting index..")
+            backup_path = f"./backup_path/{index_key}/{self.current_session_id}/{current_datetime}"
+            index_path = f"./storage/{self.current_session_id}/{index_key}"
+            documents_path = f"./data/{index_key}/{self.current_session_id}/{file_name}"
+            directory_path = f"data/{index_key}/{self.current_session_id}"
+            if not os.path.exists(documents_path):
+                os.makedirs(documents_path)
+            if not os.path.exists(backup_path):
+                os.makedirs(backup_path)
+            if not os.path.exists(index_path):
+                os.makedirs(index_path)
+            shutil.move(documents_path, backup_path)
+            shutil.rmtree(index_path)
+
+            string_to_match = f'data\\{index_key}\\{self.current_session_id}\\{file_name}'
+            filtered_list = [item for item in self.doc_ids[index_key]
+                            if item.startswith(string_to_match)]
+            for item in filtered_list:
+                self.indices[index_key].delete_ref_doc(item, delete_from_docstore=True)
+            id = self.indices[index_key].index_id
+            status = ""
+            gr.Info("Index is deleted")
+            debug_info = status
+            return debug_info
+        else:
+            return None
+
+    def get_sources(self, choice):
+        if choice == "view source":
+            return gr.Textbox.update(value=self.response_sources)
+
+    def set_openai_api_key(self, api_key: str):
+        if api_key:
+            openai.api_key = api_key
+            os.environ["OPENAI_API_KEY"] = api_key
+            llm_predictor = LLMPredictor(llm=ChatOpenAI(
+                temperature=0, model_name=self.model, streaming=True))
+            global service_context
+            service_context = ServiceContext.from_defaults(
+                llm_predictor=llm_predictor, chunk_size=1024)
+        else:
+            gr.Warning("Please enter a valid OpenAI API key or set the env key.")
+
+    def openai_agent(self, prompt):
+        response = openai.chat.completions.create(
+            model=self.model,
+            messages=prompt,
+            temperature=1.0,
+            stream=True
+        )
+        return response
+
+    def update_company_info(self, upload_file):
+        file_value = self.get_company_files_inform(directory_path=f"data/company/{self.current_session_id}")
+        return gr.update(value=file_value)
+
+    def update_tender_info(self, upload_file):
+        file_value = self.get_tender_files_inform(directory_path=f"data/tender/{self.current_session_id}")
+        return gr.update(value=file_value)
+
+    def set_tender_pdf(self, evt: gr.SelectData):
+        select_data = evt.index
+        if select_data[1] == 0:
+            pdf_viewer_content = f'<iframe src="file/data/tender/{self.current_session_id}/{evt.value}" width="100%" height="600px"></iframe>'
+            file_path = self.search_files_by_name("./data", evt.value)
+            webbrowser.open(file_path)
+            return gr.update(value=pdf_viewer_content)
+        else:
+            self.delete_row("tender", self.file_tender_inform_datas[int(select_data[0])][0])
+
+    def set_company_pdf(self, evt: gr.SelectData):
+        select_data = evt.index
+        if select_data[1] == 0:
+            pdf_viewer_content = f'<iframe src="file/data/company/{self.current_session_id}/{evt.value}" width="100%" height="600px"></iframe>'
+            file_path = self.search_files_by_name("./data", evt.value)
+            webbrowser.open(file_path)
+            return gr.update(value=pdf_viewer_content)
+        else:
+            self.delete_row(
+                "company", self.file_company_inform_datas[int(select_data[0])][0])
+
+    def set_source_pdf(self, evt: gr.SelectData):
+        pdf_viewer_content = f'<iframe src="file/data/company/{evt.value}" width="100%" height="800px"></iframe>'
+        return gr.update(value=pdf_viewer_content)
+
+    def set_highlight_pdf(self, evt: gr.SelectData):
+        select_data = evt.index
+        file_name = self.source_infor_results[int(select_data[0])][0]
+        source_text = self.source_infor_results[int(select_data[0])][2]
+        file_path = self.search_files_by_name("./data", file_name)
+        webbrowser.open(file_path)
+        pdf_viewer_content = f'<h4>{source_text}</h4>'
+        return gr.update(value=pdf_viewer_content)
+
+    def search_files_by_name(self, root_dir, file_name):
+        for foldername, subfolders, filenames in os.walk(root_dir):
+            for filename in filenames:
+                if filename == file_name:
+                    return os.path.join(foldername, filename)
+
+    def update_session(self, update_data):
+        old_session = self.getSessionList()
+        new_session = update_data.values
+        for i in range(min(len(new_session), len(old_session))):
+            nested_list1 = new_session[i]
+            nested_list2 = old_session[i]
+            str1 = str(nested_list1)
+            str2 = str(nested_list2)
+            if str1 != str2:
+                conn = sqlite3.connect("chat_history.db")
+                cursor = conn.cursor()
+                cursor.execute("UPDATE session_history SET session_title = ? WHERE id = ?;",
+                            (nested_list1[0], self.session_list[i]))
+                conn.commit()
+                conn.close()
+
+    def add_session(self, session_title):
+        if session_title:
+            conn = sqlite3.connect("chat_history.db")
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO session_history(session_title) VALUES (?)", (session_title,))
+            self.current_session_id = cursor.lastrowid
+            self.current_session_id
+            conn.commit()
+            conn.close()
+            return gr.update(value=self.getSessionList())
+        else:
+            gr.Info("You have to input Sesstion title")
+            return gr.update(value=self.getSessionList())
+
+    def set_session(self, evt: gr.SelectData):
+        select_data = evt.index
+        self.current_session_id = self.session_list[int(select_data[0])]
+
+ragBot = RagBot()
 
 with open(
     "./assets/custom.css",
@@ -966,7 +786,7 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
             session_title = gr.Textbox(label="Session Title")
             new_session_btn = gr.Button(value="New Session")
             session_list_dataframe = gr.Dataframe(
-                value=getSessionList,
+                value=ragBot.getSessionList,
                 headers=["Session List"],
                 datatype=["str"],
                 col_count=(1, "fixed"),
@@ -977,7 +797,7 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
         with gr.Column(scale=15):
             with gr.Row():
                 with gr.Column(scale=6):
-                    chatbot = gr.Chatbot(value=get_chat_history(), elem_id="chuanhu_chatbot", height="850px")
+                    chatbot = gr.Chatbot(value=get_chat_history(ragBot.current_session_id), elem_id="chuanhu_chatbot", height="850px")
                     msg = gr.Textbox(
                         label=" 🪄",
                         placeholder="Type a message to the bot and press enter",
@@ -985,7 +805,7 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
                     )
                 with gr.Column(scale=4):
                     source_dataframe = gr.Dataframe(
-                        value=update_source,
+                        value=ragBot.update_source,
                         headers=["question", "File name", "page numeber"],
                         datatype=["str", "str", "str"],
                         col_count=(3, "fixed"),
@@ -1001,7 +821,7 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
             with gr.Accordion("⚙️ Settings", open=False):
                 with gr.Tab("history"):
                     google_search_dataframe = gr.Dataframe(
-                        value=google_source_urls,
+                        value=ragBot.google_source_urls,
                         headers=["Question", "Source URL-1", "Source URL-2", "Source URL-3", "Source URL-4",
                                  "Source URL-5", "Source URL-6", "Source URL-7", "Source URL-8", "Source URL-9", "Source URL-10"],
                         datatype=["str", "str", "str", "str", "str","str", "str", "str", "str", "str", "str"],
@@ -1016,44 +836,44 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
                     lines=1,
                     type="password",
                 )
-                openai_api_key_textbox.change(set_openai_api_key, inputs=openai_api_key_textbox)
+                openai_api_key_textbox.change(ragBot.set_openai_api_key, inputs=openai_api_key_textbox)
                 chatting_mode_radio = gr.Radio(
                     value="Documents and Search", choices=["Only Document", "No Documents", "Documents and Search"], label="Chatting Quality > Agent Type"
                 )
                 custom_prompt = gr.Textbox(
                     placeholder="Here goes the custom prompt",
-                    value=template,
+                    value=TEMPLATE,
                     lines=5,
                     label="Custom Prompt",
                 )
-                custom_prompt.change(fn=set_prompt, inputs=custom_prompt)
+                custom_prompt.change(fn=ragBot.set_prompt, inputs=custom_prompt)
                 tender_description_textbox = gr.Textbox(
                     placeholder="Here goes the tender description",
-                    value=tender_description,
+                    value=ragBot.tender_description,
                     lines=5,
                     label="Tender Description",
                 )
-                tender_description_textbox.change(lambda x: set_description("tender_description", x), inputs=tender_description_textbox)
+                tender_description_textbox.change(lambda x: ragBot.set_description("tender_description", x), inputs=tender_description_textbox)
 
                 company_description_textbox = gr.Textbox(
                     placeholder="Here goes the company description",
-                    value=company_description,
+                    value=ragBot.company_description,
                     lines=5,
                     label="Company Description",
                 )
 
-                company_description_textbox.change(lambda x: set_description("company_description", x), inputs=company_description_textbox)
+                company_description_textbox.change(lambda x: ragBot.set_description("company_description", x), inputs=company_description_textbox)
                 radio = gr.Radio(
                     value="gpt-4-turbo-preview", choices=["gpt-3.5-turbo", "gpt-4-turbo-preview"], label="Models"
                 )
-                radio.change(set_model, inputs=radio)
+                radio.change(ragBot.set_model, inputs=radio)
                 radioColBERT = gr.Radio(
                     value="No", choices=["Yes", "No"], label="ColBERT"
                 )
-                radioColBERT.change(set_colbert, inputs=radioColBERT) 
+                radioColBERT.change(ragBot.set_colbert, inputs=radioColBERT) 
                 with gr.Row():
-                    tender_data = get_tender_files_inform(directory_path=f"data/tender/{current_session_id}")
-                    company_data = get_company_files_inform(directory_path=f"data/company/{current_session_id}")
+                    tender_data = ragBot.get_tender_files_inform(directory_path=f"data/tender/{ragBot.current_session_id}")
+                    company_data = ragBot.get_company_files_inform(directory_path=f"data/company/{ragBot.current_session_id}")
 
                     tender_dataframe = gr.Dataframe(
                         value=tender_data,
@@ -1110,74 +930,74 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
                 )
 
     msg.submit(user, [msg, chatbot], [msg, chatbot], queue=False).then(
-        bot, [chatbot, session_state], [chatbot, session_state]).then(
-        lambda: gr.update(value=get_chat_history()), None, outputs=[chatbot]).then(
-        lambda: gr.update(value=update_source()), None, outputs=source_dataframe).then(
-            update_source_info, None, outputs=sources
+        ragBot.bot, [chatbot, session_state], [chatbot, session_state]).then(
+        lambda: gr.update(value=get_chat_history(ragBot.current_session_id)), None, outputs=[chatbot]).then(
+        lambda: gr.update(value=ragBot.update_source()), None, outputs=source_dataframe).then(
+            ragBot.update_source_info, None, outputs=sources
     ).then(
-        lambda: gr.update(value=google_source_urls), None, outputs=google_search_dataframe)
+        lambda: gr.update(value=ragBot.google_source_urls), None, outputs=google_search_dataframe)
 
     file_response1 = upload_button1.upload(
-        lambda files: upload_file(files, "tender"), upload_button1
+        lambda files: ragBot.upload_file(files, "tender"), upload_button1
     ).then(
-        update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe
+        ragBot.update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe
     )
     file_response2 = upload_button2.upload(
-        lambda files: upload_file(files, "company"), upload_button2
+        lambda files: ragBot.upload_file(files, "company"), upload_button2
     ).then(
-        update_company_info, inputs=[
+        ragBot.update_company_info, inputs=[
             company_dataframe], outputs=company_dataframe
     )
     file_response3 = upload_button3.upload(
-        lambda files: upload_file(files, "url"), upload_button3
+        lambda files: ragBot.upload_file(files, "url"), upload_button3
     ).then(
-        lambda: gr.update(value=google_source_urls), None, outputs=google_search_dataframe)
+        lambda: gr.update(value=ragBot.google_source_urls), None, outputs=google_search_dataframe)
     file_response1.then(
-        update_debug_info, inputs=[upload_button1], outputs=debug_output
+        ragBot.update_debug_info, inputs=[upload_button1], outputs=debug_output
     )
     file_response2.then(
-        update_debug_info, inputs=[upload_button2], outputs=debug_output
+        ragBot.update_debug_info, inputs=[upload_button2], outputs=debug_output
     )
 
-    delete_button1.click(lambda: delete_index("tender")).then(
-        update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe
+    delete_button1.click(lambda: ragBot.delete_index("tender")).then(
+        ragBot.update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe
     )
-    delete_button2.click(lambda: delete_index("company")).then(
-        update_company_info, inputs=[
+    delete_button2.click(lambda: ragBot.delete_index("company")).then(
+        ragBot.update_company_info, inputs=[
             company_dataframe], outputs=company_dataframe
     )
 
-    chatting_mode_radio.change(set_chatting_mode, inputs=[chatting_mode_radio])
+    chatting_mode_radio.change(ragBot.set_chatting_mode, inputs=[chatting_mode_radio])
 
     clear.click(lambda: [], None, chatbot, queue=False).then(
-        clear_chat_history, None, outputs=[chatbot]).then(
-        lambda: gr.update(value=update_source()), None, outputs=source_dataframe).then(
-        lambda: gr.update(value=getSessionList()), None, outputs=session_list_dataframe).then(
-        lambda: gr.update(value=google_source_urls), None, outputs=google_search_dataframe)
+        ragBot.clear_chat_history, None, outputs=[chatbot]).then(
+        lambda: gr.update(value=ragBot.update_source()), None, outputs=source_dataframe).then(
+        lambda: gr.update(value=ragBot.getSessionList()), None, outputs=session_list_dataframe).then(
+        lambda: gr.update(value=ragBot.google_source_urls), None, outputs=google_search_dataframe)
 
-    tender_dataframe.select(set_tender_pdf, None, pdf_viewer_html).then(
-        update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe
+    tender_dataframe.select(ragBot.set_tender_pdf, None, pdf_viewer_html).then(
+        ragBot.update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe
     )
-    company_dataframe.select(set_company_pdf, None, pdf_viewer_html).then(
-        update_company_info, inputs=[
+    company_dataframe.select(ragBot.set_company_pdf, None, pdf_viewer_html).then(
+        ragBot.update_company_info, inputs=[
             company_dataframe], outputs=company_dataframe
     )
-    source_dataframe.select(set_highlight_pdf, None, pdf_viewer_html)
+    source_dataframe.select(ragBot.set_highlight_pdf, None, pdf_viewer_html)
 
-    session_list_dataframe.select(set_session, None, None).then(
-        lambda: gr.update(value=get_chat_history()), None, outputs=[chatbot]).then(
-        lambda: gr.update(value=update_source()), None, outputs=source_dataframe).then(
-            update_source_info, None, outputs=sources).then(
-            update_url_info, None, outputs=google_search_dataframe).then(
-        lambda: gr.update(value=google_source_urls), None, outputs=google_search_dataframe).then(
-            update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe).then(
-            update_company_info, inputs=[company_dataframe], outputs=company_dataframe)
+    session_list_dataframe.select(ragBot.set_session, None, None).then(
+        lambda: gr.update(value=get_chat_history(ragBot.current_session_id)), None, outputs=[chatbot]).then(
+        lambda: gr.update(value=ragBot.update_source()), None, outputs=source_dataframe).then(
+            ragBot.update_source_info, None, outputs=sources).then(
+            ragBot.update_url_info, None, outputs=google_search_dataframe).then(
+        lambda: gr.update(value=ragBot.google_source_urls), None, outputs=google_search_dataframe).then(
+            ragBot.update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe).then(
+            ragBot.update_company_info, inputs=[company_dataframe], outputs=company_dataframe)
 
-    session_list_dataframe.input(update_session, inputs=[
+    session_list_dataframe.input(ragBot.update_session, inputs=[
                                  session_list_dataframe])
 
-    new_session_btn.click(add_session, inputs=[session_title], outputs=[
+    new_session_btn.click(ragBot.add_session, inputs=[session_title], outputs=[
                           session_list_dataframe])
 
 demo.queue().launch(inline=True).then(lambda: gr.update(
-    value=get_chat_history()), None, outputs=[chatbot])
+    value=get_chat_history(ragBot.current_session_id)), None, outputs=[chatbot])
