@@ -42,6 +42,7 @@ openai.api_key = OPENAI_API_KEY
 
 class RagBot:
     def __init__(self):
+        create_tables()
         self.custom_prompt = PromptTemplate(TEMPLATE)
         self.tender_description = gr.State("")
         self.company_description = gr.State("")
@@ -71,7 +72,6 @@ class RagBot:
         self.chatting_mode_status = ""
         self.chat_history = []
         
-        create_tables()
         self.set_chatting_mode("Documents and Search")
         self.set_model(self.model)
         self.getSessionList()
