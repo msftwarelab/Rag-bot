@@ -4,22 +4,19 @@ from src.config import DATABASE_PATH
 
 def create_tables():
     conn = sqlite3.connect(DATABASE_PATH)
-    cursor_1 = conn.cursor()
-    cursor_1.execute('''
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id INTEGER PRIMARY KEY,
-            chat_history TEXT,
-            source_inform TEXT,
-            session_id INTEGER
-        )
-    ''')
-    cursor_2 = conn.cursor()
-    cursor_2.execute('''
-        CREATE TABLE IF NOT EXISTS session_history (
-            id INTEGER PRIMARY KEY,
-            session_title TEXT
-        )
-    ''')
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS chat_history (
+        id INTEGER PRIMARY KEY,
+        chat_history TEXT,
+        source_inform TEXT,
+        session_id INTEGER
+    )''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS session_history (
+        id INTEGER PRIMARY KEY,
+        session_title TEXT
+    )''')
     conn.commit()
     conn.close()
 

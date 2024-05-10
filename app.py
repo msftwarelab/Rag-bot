@@ -33,6 +33,7 @@ from src.database import create_tables, add_chat_history, get_chat_history, dele
 from src.utilities import pdf_view_url, get_available_storage, check_or_create_directory
 
 load_dotenv()
+create_tables()
 
 # RAGatouilleRetrieverPack = download_llama_pack(
 #     "RAGatouilleRetrieverPack", "./ragatouille_pack"
@@ -42,7 +43,6 @@ openai.api_key = OPENAI_API_KEY
 
 class RagBot:
     def __init__(self):
-        create_tables()
         self.custom_prompt = PromptTemplate(TEMPLATE)
         self.tender_description = gr.State("")
         self.company_description = gr.State("")
