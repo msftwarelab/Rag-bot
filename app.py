@@ -28,7 +28,7 @@ from llama_hub.tools.tavily_research import TavilyToolSpec
 
 from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
 # from llama_index.core.llama_pack import download_llama_pack
-from src.config import WORDLIFT_THEME, GOOGLE_API_KEY, GOOGLE_ENGINE_ID, TAVILY_API_KEY, OPENAI_API_KEY, TEMPLATE
+from src.config import DATABASE_PATH, WORDLIFT_THEME, GOOGLE_API_KEY, GOOGLE_ENGINE_ID, TAVILY_API_KEY, OPENAI_API_KEY, TEMPLATE
 from src.database import create_tables, add_chat_history, get_chat_history, delete_chat_history
 from src.utilities import pdf_view_url, get_available_storage, check_or_create_directory
 
@@ -100,7 +100,7 @@ class RagBot:
     def getSessionList(self):
         temp = []
         try:
-            with sqlite3.connect("chat_history.db") as conn:
+            with sqlite3.connect(DATABASE_PATH) as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT * FROM session_history ORDER BY id DESC")
                 rows = cursor.fetchall()
@@ -115,6 +115,7 @@ class RagBot:
                     self.current_session_id = 0
                     gr.Info("You have to create Session")
         except sqlite3.Error as e: 
+            print("No tables")
             temp.append(['No Data'])
             gr.Info("You have to create Session")
         return temp
@@ -557,7 +558,7 @@ class RagBot:
             with sqlite3.connect("chat_history.db") as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, session_id, data
+                    SELECT *
                     FROM chat_history
                     WHERE session_id = ?
                     ORDER BY id
