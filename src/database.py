@@ -3,28 +3,22 @@ import sqlite3
 from src.config import DATABASE_PATH
 
 def create_tables():
-    try:
-        # Check if the path is accessible or print an error if not
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id INTEGER PRIMARY KEY,
-            chat_history TEXT,
-            source_inform TEXT,
-            session_id INTEGER
-        )''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS session_history (
-            id INTEGER PRIMARY KEY,
-            session_title TEXT
-        )''')
-        conn.commit()
-        print("Tables created successfully or already exist.")
-    except sqlite3.Error as e:
-        print(f"An error occurred: {e}")
-    finally:
-        conn.close()
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS chat_history (
+        id INTEGER PRIMARY KEY,
+        chat_history TEXT,
+        source_inform TEXT,
+        session_id INTEGER
+    )''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS session_history (
+        id INTEGER PRIMARY KEY,
+        session_title TEXT
+    )''')
+    conn.commit()
+    conn.close()
 
 def add_chat_history(value, source_inform, session_id):
     conn = sqlite3.connect(DATABASE_PATH)

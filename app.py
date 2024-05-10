@@ -60,7 +60,7 @@ class RagBot:
         self.source_infor_results = []
         self.file_tender_inform_datas = []
         self.file_company_inform_datas = []
-        self.current_session_id = ''
+        self.current_session_id = 0
         self.session_list = []
         self.doc_ids = {"company": [], "tender": []}
         self.documents = []
@@ -98,58 +98,69 @@ class RagBot:
         self.initRAGatouille()
 
     def getSessionList(self):
-        conn = sqlite3.connect("chat_history.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM session_history ORDER BY id DESC")
-        rows = cursor.fetchall()
-        self.session_list = []
         temp = []
-        if len(rows) > 0:
-            last_id = rows[0][0]
-            if self.current_session_id == '':
-                self.current_session_id = last_id
-            for row in rows:
-                self.session_list.append(row[0])
-                temp.append([row[1]])
-        else:
+        try:
+            with sqlite3.connect("chat_history.db") as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM session_history ORDER BY id DESC")
+                rows = cursor.fetchall()
+                self.session_list = []
+                if rows:
+                    self.session_list = [row[0] for row in rows]
+                    temp = [row[1] for row in rows]
+                    if not self.current_session_id:
+                        self.current_session_id = rows[0][0]
+                else:
+                    temp.append(['No Data'])
+                    self.current_session_id = 0
+                    gr.Info("You have to create Session")
+        except sqlite3.Error as e: 
             temp.append(['No Data'])
             gr.Info("You have to create Session")
-        conn.commit()
-        conn.close()
         return temp
 
     def get_tender_files_inform(self, directory_path):
-        if not os.path.exists(directory_path):
-            os.makedirs(directory_path)
-        files = os.listdir(directory_path)
-        if len(files) > 0:
-            self.load_or_update_index(f"./data/tender/{self.current_session_id}/", 'tender')
-        file_inform_data = []
-        self.file_tender_inform_datas = []
-        for file_number, file_name in enumerate(files, start=1):
-            file_inform_data = [file_name, "Delete"]
-            self.file_tender_inform_datas.append(file_inform_data)
-        if self.file_tender_inform_datas:
-            return self.file_tender_inform_datas
-        else:
-            return [['No File', ' ']]
+        try:
+            os.makedirs(directory_path, exist_ok=True)
+
+            files = os.listdir(directory_path)
+
+            if files:
+                self.load_or_update_index(f"data/tender/{self.current_session_id}/", 'tender')
+
+            self.file_tender_inform_datas = [[file_name, "Delete"] for file_name in files]
+
+            return self.file_tender_inform_datas or [['No File', ' ']]
+
+        except OSError as e:
+            gr.Info(f"File system error: {str(e)}")
+            return [['Error', 'File System Issue']]
+
+        except Exception as e:
+            gr.Info(f"Unexpected error: {str(e)}")
+            return [['Error', 'Unexpected Issue']]
 
 
     def get_company_files_inform(self, directory_path):
-        if not os.path.exists(directory_path):
-            os.makedirs(directory_path)
-        files = os.listdir(directory_path)
-        if len(files) > 0:
-            self.load_or_update_index(f"./data/company/{self.current_session_id}/", 'company')
-        file_inform_data = []
-        self.file_company_inform_datas = []
-        for file_number, file_name in enumerate(files, start=1):
-            file_inform_data = [file_name, "Delete"]
-            self.file_company_inform_datas.append(file_inform_data)
-        if self.file_company_inform_datas:
-            return self.file_company_inform_datas
-        else:
-            return [['No File', ' ']]
+        try:
+            os.makedirs(directory_path, exist_ok=True)
+
+            files = os.listdir(directory_path)
+
+            if files:
+                self.load_or_update_index(f"data/company/{self.current_session_id}/", 'company')
+
+            self.file_company_inform_datas = [[file_name, "Delete"] for file_name in files]
+
+            return self.file_company_inform_datas or [['No File', ' ']]
+
+        except OSError as e:
+            gr.Info(f"File system error: {str(e)}")
+            return [['Error', 'File System Issue']]
+
+        except Exception as e:
+            gr.Info(f"Unexpected error: {str(e)}")
+            return [['Error', 'Unexpected Issue']]
 
     def load_index(self, directory_path, index_key):
         documents = SimpleDirectoryReader(
@@ -539,43 +550,44 @@ class RagBot:
                     self.google_source_urls.append(['question']+value)
 
     def update_source(self):
+        final_result = []
         self.source_infor_results = []
-        conn = sqlite3.connect("chat_history.db")
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT *
-            FROM chat_history
-            WHERE session_id = ?
-            ORDER BY id
-        """, (self.current_session_id,))
-        rows = cursor.fetchall()
-        source_informs = []
-        if rows:
-            for row in rows:
-                if row[2] != "no_data":
-                    temp = list(row[2].split("&&&&"))
-                    temp.append(list(row[1].split("::::"))[0])
-                    source_informs.append(temp)
-        if source_informs:
-            for source_inform in source_informs:
-                for temp in source_inform[:-2]:
-                    temp_1 = list(temp.split("::::"))
-                    temp_1.append(source_inform[-1])
-                    self.source_infor_results.append(temp_1)
-            conn.close()
-            final_result = []
-            for result in self.source_infor_results:
-                temp = []
-                temp.append(result[-1])
-                temp.append(result[0])
-                temp.append(result[1])
-                final_result.append(temp)
-            if final_result:
-                return final_result
-            else:
-                return [['No Data', 'No Data', 'No Data']]
-        else:
-            return [['No Data', 'No Data', 'No Data']]
+        
+        try:
+            with sqlite3.connect("chat_history.db") as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, session_id, data
+                    FROM chat_history
+                    WHERE session_id = ?
+                    ORDER BY id
+                """, (self.current_session_id,))
+                rows = cursor.fetchall()
+
+                if rows:
+                    source_informs = [
+                        list(row[2].split("&&&&")) + [row[1].split("::::")[0]]
+                        for row in rows if row[2] != "no_data"
+                    ]
+
+                    for source_inform in source_informs:
+                        for temp in source_inform[:-1]:
+                            temp_1 = list(temp.split("::::")) + [source_inform[-1]]
+                            self.source_infor_results.append(temp_1)
+
+                    final_result = [
+                        [result[-1], result[0], result[1]]
+                        for result in self.source_infor_results
+                    ]
+
+            if not final_result:
+                final_result = [['No Data', 'No Data', 'No Data']]
+
+        except sqlite3.Error as e:
+            gr.Info(f"Database error: {str(e)}")
+            final_result = [['No Data', 'No Data', 'No Data']]
+
+        return final_result
 
 
     def get_source_info(self):
