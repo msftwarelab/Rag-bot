@@ -100,7 +100,7 @@ class RagBot:
     def getSessionList(self):
         conn = sqlite3.connect("chat_history.db")
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM session_history ORDER BY id DESC")
+        cursor.execute("SELECT * FROM chat_history ORDER BY id DESC")
         rows = cursor.fetchall()
         self.session_list = []
         temp = []
