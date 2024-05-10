@@ -107,16 +107,15 @@ class RagBot:
                 self.session_list = []
                 if rows:
                     self.session_list = [row[0] for row in rows]
-                    temp = [row[1] for row in rows]
+                    temp = [[row[1]] for row in rows]
                     if not self.current_session_id:
                         self.current_session_id = rows[0][0]
                 else:
-                    temp.append(['No Data'])
+                    temp = [["No Data"]]
                     self.current_session_id = 0
                     gr.Info("You have to create Session")
         except sqlite3.Error as e: 
-            print("No tables")
-            temp.append(['No Data'])
+            temp = [["No Data"]]
             gr.Info("You have to create Session")
         return temp
 
