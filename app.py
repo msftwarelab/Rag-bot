@@ -739,39 +739,51 @@ class RagBot:
                     return os.path.join(foldername, filename)
 
     def update_session(self, update_data):
-        old_session = self.getSessionList()
-        new_session = update_data.values
-        for i in range(min(len(new_session), len(old_session))):
-            nested_list1 = new_session[i]
-            nested_list2 = old_session[i]
-            str1 = str(nested_list1)
-            str2 = str(nested_list2)
-            if str1 != str2:
-                conn = sqlite3.connect("chat_history.db")
+        old_sessions = self.getSessionList()
+        new_sessions = update_data.values
+
+        try:
+            with sqlite3.connect(DATABASE_PATH) as conn:
                 cursor = conn.cursor()
-                cursor.execute("UPDATE session_history SET session_title = ? WHERE id = ?;",
-                            (nested_list1[0], self.session_list[i]))
+                for i in range(min(len(new_sessions), len(old_sessions))):
+                    old_session_title = old_sessions[i][0]
+                    new_session_title = new_sessions[i][0]
+                    if old_session_title != new_session_title:
+                        cursor.execute(
+                            "UPDATE session_history SET session_title = ? WHERE id = ?;",
+                            (new_session_title, self.session_list[i])
+                        )
                 conn.commit()
-                conn.close()
+        except sqlite3.Error as e:
+            print(f"Database Error: {e}")
 
     def add_session(self, session_title):
-        if session_title:
-            conn = sqlite3.connect("chat_history.db")
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO session_history(session_title) VALUES (?)", (session_title,))
-            self.current_session_id = cursor.lastrowid
-            self.current_session_id
-            conn.commit()
-            conn.close()
-            return gr.update(value=self.getSessionList())
-        else:
-            gr.Info("You have to input Sesstion title")
+        if not session_title:
+            gr.Info("You have to input a session title.")
             return gr.update(value=self.getSessionList())
 
+        try:
+            with sqlite3.connect(DATABASE_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO session_history(session_title) VALUES (?)",
+                    (session_title,)
+                )
+                self.current_session_id = cursor.lastrowid
+                conn.commit()
+        except sqlite3.Error as e:
+            print(f"Database Error: {e}")
+            gr.Info("Failed to add session due to a database error.")
+        
+        return gr.update(value=self.getSessionList())
+
     def set_session(self, evt: gr.SelectData):
-        select_data = evt.index
-        self.current_session_id = self.session_list[int(select_data[0])]
+        try:
+            select_data = evt.index
+            self.current_session_id = self.session_list[int(select_data[0])]
+        except IndexError as e:
+            print(f"Selection Error: {e}")
+            gr.Info("Invalid session selection.")
 
 ragBot = RagBot()
 
