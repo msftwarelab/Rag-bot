@@ -3,7 +3,7 @@ import sqlite3
 from .config import DATABASE_PATH
 
 def create_tables():
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect("../chat_history.db")
     cursor_1 = conn.cursor()
     cursor_1.execute('''
         CREATE TABLE IF NOT EXISTS chat_history (
