@@ -11,3 +11,5 @@ backup_path/
 ragatouille_pack/
 app_1.py
 *.env
+chat_history.db
+requirements-dev.txt

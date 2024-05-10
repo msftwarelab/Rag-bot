@@ -4,8 +4,8 @@ from .config import DATABASE_PATH
 
 def create_tables():
     conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
+    cursor_1 = conn.cursor()
+    cursor_1.execute('''
         CREATE TABLE IF NOT EXISTS chat_history (
             id INTEGER PRIMARY KEY,
             chat_history TEXT,
@@ -13,7 +13,8 @@ def create_tables():
             session_id INTEGER
         )
     ''')
-    cursor.execute('''
+    cursor_2 = conn.cursor()
+    cursor_2.execute('''
         CREATE TABLE IF NOT EXISTS session_history (
             id INTEGER PRIMARY KEY,
             session_title TEXT
