@@ -20,6 +20,7 @@ def create_tables():
             session_title TEXT
         )
     ''')
+    print("==> databases are created")
     conn.commit()
     conn.close()
 
