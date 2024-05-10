@@ -1,9 +1,9 @@
 # database.py
 import sqlite3
-from .config import DATABASE_PATH
+from src.config import DATABASE_PATH
 
 def create_tables():
-    conn = sqlite3.connect("../chat_history.db")
+    conn = sqlite3.connect("chat_history.db")
     cursor_1 = conn.cursor()
     cursor_1.execute('''
         CREATE TABLE IF NOT EXISTS chat_history (
@@ -20,7 +20,6 @@ def create_tables():
             session_title TEXT
         )
     ''')
-    print("==> databases are created")
     conn.commit()
     conn.close()
 

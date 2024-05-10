@@ -79,4 +79,4 @@ Devi sempre rispondere in italiano e fornire risposte dettagliate e ben argoment
 
 Riassumi i punti chiave e le scoperte principali, includendo eventuali collegamenti diretti alle fonti online quando possibile.
 '''
-DATABASE_PATH = "../chat_history.db"
+DATABASE_PATH = "chat_history.db"

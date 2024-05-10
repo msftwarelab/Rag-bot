@@ -29,7 +29,7 @@ from llama_hub.tools.tavily_research import TavilyToolSpec
 from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
 # from llama_index.core.llama_pack import download_llama_pack
 from src.config import WORDLIFT_THEME, GOOGLE_API_KEY, GOOGLE_ENGINE_ID, TAVILY_API_KEY, OPENAI_API_KEY, TEMPLATE
-from src.database import create_tables, add_chat_history, get_chat_history, delete_chat_history
+from .database import create_tables, add_chat_history, get_chat_history, delete_chat_history
 from src.utilities import pdf_view_url, get_available_storage, check_or_create_directory
 
 load_dotenv()
