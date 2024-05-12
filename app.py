@@ -282,138 +282,83 @@ class RagBot:
 
 
     async def bot(self, history, messages_history):
-        if not self.current_session_id:
-            gr.Info("You have to create a new session")
-            return
+        if self.current_session_id == '':
+            return gr.update(value="You have to create a new session", visible=True)
+
+        if not openai.api_key:
+            return gr.update(value="Invalid OpenAI API key.", visible=True)
+
+        loaded_history = get_chat_history(self.current_session_id)
+        history_message = [ChatMessage(role="user", content=history_data[0]) for history_data in loaded_history[-5:]]
+
         try:
-            if not openai.api_key:
-                gr.Warning("Invalid OpenAI API key.")
-                raise ValueError("Invalid OpenAI API key.")
+            company = self.indices.get("company")
+            tender = self.indices.get("tender")
+        except KeyError:
+            return gr.update(value="Index not found. Please upload the files first.", visible=True)
 
-            loaded_history = get_chat_history(self.current_session_id)
-            history_message = self.build_history_message(loaded_history)
+        tools = self.prepare_tools(company, tender)
+        agent = self.prepare_agent(tools)
+        message = history[-1][0]
+        qa_message = f"{message}. Devi rispondere in italiano."
 
-            try:
-                company = self.indices.get("company")
-                tender = self.indices.get("tender")
-            except KeyError as e:
-                gr.Warning("Please enter a valid OpenAI API key or set the env key.")
-                yield history, messages_history
-                return
+        if self.colbert == 'No':
+            response = await self.handle_chat_without_colbert(agent, qa_message, message)
+        else:
+            response = await self.handle_chat_with_colbert(qa_message, message)
 
-            if not (tender or company):
-                gr.Warning("Index not found. Please upload the files first.")
-                yield history, messages_history
-                return
+        for stream_token in response:
+            yield history, messages_history
 
-            message = history[-1][0]
+        if stream_token and message:
+            add_chat_history(f"{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
 
-            if self.chatting_mode_status == "Only Document":
-                tools = self.build_tools(company, tender)
-                agent = OpenAIAgent.from_tools(tools, verbose=True, prompt=self.custom_prompt)
-                if history_message:
-                    agent.memory.set(history_message)
-
-                response = await self.handle_only_document_mode(agent, message)
-
-            elif self.chatting_mode_status == "Documents and Search":
-                tools = self.build_tools(company, tender) + TavilyToolSpec(api_key=TAVILY_API_KEY).to_tool_list()
-                agent = OpenAIAgent.from_tools(tools, verbose=True, prompt=self.custom_prompt)
-
-                response = await self.handle_documents_and_search_mode(agent, message)
-
-            else:
-                response = await self.handle_default_mode(message, loaded_history)
-
-            for token in response:
-                yield history, messages_history
-
-        except ValueError as e:
-            gr.Warning(str(e))
-        except Exception as e:
-            gr.Warning(f"Unexpected error occurred: {str(e)}")
-
-    def build_history_message(self, loaded_history):
-        history_messages = []
-        for history_data in loaded_history[-min(5, len(loaded_history)):]:
-            history_messages.append(ChatMessage(role="user", content=history_data[0]))
-            history_messages.append(ChatMessage(role="assistant", content=history_data[1]))
-        return history_messages
-
-    def build_tools(self, company, tender):
+    def prepare_tools(self, company, tender):
         tools = []
-        if company:
-            tools.append(QueryEngineTool(
-                query_engine=company.as_query_engine(similarity_top_k=10),
-                metadata=ToolMetadata(name='company_index', description=f'{self.company_description}')
-            ))
-        if tender:
-            tools.append(QueryEngineTool(
-                query_engine=tender.as_query_engine(similarity_top_k=10),
-                metadata=ToolMetadata(name='tender_index', description=f'{self.tender_description}')
-            ))
+        if company and tender:
+            tools.extend(self.get_query_engine_tools(company, 'company'))
+            tools.extend(self.get_query_engine_tools(tender, 'tender'))
+        elif company:
+            tools.extend(self.get_query_engine_tools(company, 'company'))
+        elif tender:
+            tools.extend(self.get_query_engine_tools(tender, 'tender'))
+        if self.chatting_mode_status == "Documents and Search":
+            tavily_tool = TavilyToolSpec(api_key=TAVILY_API_KEY).to_tool_list()
+            tools.extend(tavily_tool)
         return tools
 
-    async def handle_only_document_mode(self, agent, message: str):
-        qa_message = f"{message}. Devi rispondere in italiano."
-        if self.colbert == 'No':
-            response = agent.stream_chat(qa_message)
-            stream_token = ""
-            for token in response.response_gen:
-                stream_token += token
-                yield stream_token
+    def prepare_agent(self, tools):
+        custom_prompt = self.custom_prompt if hasattr(self, 'custom_prompt') else None
+        return OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
 
-            if stream_token and message:
-                add_chat_history(f"#{len(self.source_infor_results)}:{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
-        else:
-            ragatouille_pack = RAGatouilleRetrieverPack(
-                self.documents,
-                llm=OpenAI(model='gpt-4-1106-preview'),
-                index_name="my_index",
-                top_k=5
-            )
-            response = ragatouille_pack.run(qa_message)
-
-            stream_token = ""
-            for token in str(response):
-                stream_token += token
-                yield stream_token
-
-            if stream_token and message:
-                add_chat_history(f"#{len(self.source_infor_results)}:{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
-
-    async def handle_documents_and_search_mode(self, agent, message: str):
-        qa_message = f":{message}. Devi rispondere in italiano."
+    async def handle_chat_without_colbert(self, agent, qa_message, message):
         response = agent.stream_chat(qa_message)
-
         stream_token = ""
         if response.source_nodes:
             self.response_sources = response.source_nodes
         else:
             self.response_sources = "No sources found."
-
         for token in response.response_gen:
             stream_token += token
-            yield stream_token
+        return stream_token
 
-        if stream_token and message:
-            add_chat_history(f"#{len(self.source_infor_results)}:{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
+    async def handle_chat_with_colbert(self, qa_message, message):
+        ragatouille_pack = RAGatouilleRetrieverPack(
+            self.documents,
+            llm=OpenAI(model='gpt-4-1106-preview'),
+            index_name="my_index",
+            top_k=5
+        )
+        response = ragatouille_pack.run(qa_message)
+        stream_token = ""
+        for token in str(response):
+            stream_token += token
+        return stream_token
 
-    async def handle_default_mode(self, message, loaded_history):
-        history_message = self.build_history_message(loaded_history)
-        history_message.append({"role": "user", "content": message})
-        qa_message = f"Devi rispondere in italiano."
-        history_message.append({"role": "user", "content": qa_message})
-        content = self.openai_agent(history_message)
-
-        partial_message = ""
-        for chunk in content:
-            if chunk.choices[0].delta.content:
-                partial_message += chunk.choices[0].delta.content
-                yield partial_message
-
-        if partial_message and message:
-            add_chat_history(f"{message}::::{partial_message}", "no_data", self.current_session_id)
+    def get_query_engine_tools(self, index, index_key):
+        query_engine = index.as_query_engine(similarity_top_k=10)
+        description = self.tender_description if index_key == 'tender' else self.company_description
+        return [QueryEngineTool(query_engine=query_engine, metadata=ToolMetadata(name=f'{index_key}_index', description=description))]
 
     def update_debug_info(self, upload_file):
         debug_info = self.status
