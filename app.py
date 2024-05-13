@@ -68,7 +68,7 @@ class RagBot:
         self.colbert = "No"
         self.service_context = gr.State('')
         self.indices = {}
-        self.index_needs_update = {"company": True, "tender": True, "search_index": True}
+        self.index_needs_update = {"company": True, "tender": True}
         self.status = ""
         self.source_infor_results = []
         self.file_tender_inform_datas = []
@@ -254,7 +254,7 @@ class RagBot:
 
             if self.google_source_urls and self.google_source_urls[0][0] != 'No data':
                 google_spec = GoogleSearchToolSpec(key=GOOGLE_API_KEY, engine=GOOGLE_ENGINE_ID, num=1)
-                self.insert_google_search_results(google_spec, "search_index")
+                self.insert_google_search_results(google_spec)
         else:
             self.index_needs_update[index_key] = True
             self.load_or_update_index(directory_path, index_key)
@@ -273,7 +273,7 @@ class RagBot:
                         file_content = ['No data'] * 10
                     self.google_source_urls.append(['question'] + file_content)
 
-    def insert_google_search_results(self, google_spec, index_key):
+    def insert_google_search_results(self, google_spec):
         for search_url in self.google_source_urls[0][1:]:
             if search_url == 'No data':
                 break
@@ -283,7 +283,7 @@ class RagBot:
                 result_dict = json.loads(result.text)
                 snippet = result_dict['items'][0]['snippet']
                 node = Document(text=snippet)
-                self.indices.get(index_key).insert_nodes([node])
+                self.indices.get("company").insert_nodes([node])
             print("The Google search result has been successfully inserted.")
 
     def clear_chat_history(self):
@@ -334,7 +334,6 @@ class RagBot:
         if self.chatting_mode_status == SEARCH_ONLY:
             tavily_tool = TavilyToolSpec(api_key=TAVILY_API_KEY)
             tavily_tool_list = tavily_tool.to_tool_list()
-            tools.extend(self.get_query_engine_tools(search_index, 'search_index'))
             tools.extend(tavily_tool_list)
         elif self.chatting_mode_status == ONLY_DOCUMENT or self.chatting_mode_status == DOCUMENTS_AND_SEARCH:
             if company and tender:
