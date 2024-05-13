@@ -68,7 +68,7 @@ class RagBot:
         self.colbert = "No"
         self.service_context = gr.State('')
         self.indices = {}
-        self.index_needs_update = {"company": True, "tender": True}
+        self.index_needs_update = {"company": True, "tender": True, "search_index": True}
         self.status = ""
         self.source_infor_results = []
         self.file_tender_inform_datas = []
@@ -239,49 +239,52 @@ class RagBot:
                 print(f"Warning: Directory '{directory_path}' not found")
 
     def upload_file(self, files, index_key):
-        gr.Info("Indexing(uploading...)Please check the Debug output")
+        gr.Info("Indexing(uploading...) Please check the Debug output")
         directory_path = f"data/{index_key}/{self.current_session_id}"
         check_or_create_directory(directory_path)
-        company = self.indices.get("company")
 
         for file in files:
             destination_path = os.path.join(directory_path, os.path.basename(file.name))
             shutil.move(file.name, destination_path)
 
         if index_key == "url":
-            file_list = os.listdir(directory_path)
-            for file_name in file_list:
-                file_path = os.path.join(directory_path, file_name)
-                if os.path.isfile(file_path):
-                    with open(file_path, 'r') as file:
-                        file_content = file.read()
-                        self.google_source_urls = []
-                        value = file_content.strip().split('\n')
-                        value = value[:10]
-                        for val in value:
-                            self.google_upload_url += f"siteSearch={val}&"
-                        if len(value) < 10:
-                            value.extend(['No data'] * (10 - len(value)))
-                        self.google_source_urls.append(['question']+value)
+            self.google_source_urls = []
+            self.process_url_files(directory_path)
             print(self.google_source_urls)
-            google_spec = GoogleSearchToolSpec(key=GOOGLE_API_KEY, engine=GOOGLE_ENGINE_ID, num=1)
-            if self.google_source_urls[0][0] != 'No data':
-                for search_url in self.google_source_urls[0][1:]:
-                    if search_url == 'No data':
-                        break
-                    search_results = google_spec.google_search(search_url)
 
-                    for result in search_results:
-                        result_dict = json.loads(result.text)
-                        snippet = result_dict['items'][0]['snippet']
-                        node = Document(text=snippet)
-                        company.insert_nodes([node])
-                    print("The Google search result has been successfully inserted.")
+            if self.google_source_urls and self.google_source_urls[0][0] != 'No data':
+                google_spec = GoogleSearchToolSpec(key=GOOGLE_API_KEY, engine=GOOGLE_ENGINE_ID, num=1)
+                self.insert_google_search_results(google_spec, "search_index")
         else:
             self.index_needs_update[index_key] = True
             self.load_or_update_index(directory_path, index_key)
             gr.Info("Documents are indexed")
+
         return "Files uploaded successfully!!!"
+
+    def process_url_files(self, directory_path):
+        file_list = os.listdir(directory_path)
+        for file_name in file_list:
+            file_path = os.path.join(directory_path, file_name)
+            if os.path.isfile(file_path):
+                with open(file_path, 'r') as file:
+                    file_content = file.read().strip().split('\n')[:10]
+                    if not file_content:
+                        file_content = ['No data'] * 10
+                    self.google_source_urls.append(['question'] + file_content)
+
+    def insert_google_search_results(self, google_spec, index_key):
+        for search_url in self.google_source_urls[0][1:]:
+            if search_url == 'No data':
+                break
+            search_results = google_spec.google_search(search_url)
+
+            for result in search_results:
+                result_dict = json.loads(result.text)
+                snippet = result_dict['items'][0]['snippet']
+                node = Document(text=snippet)
+                self.indices.get(index_key).insert_nodes([node])
+            print("The Google search result has been successfully inserted.")
 
     def clear_chat_history(self):
         self.chat_history = []
@@ -307,10 +310,11 @@ class RagBot:
         try:
             company = self.indices.get("company")
             tender = self.indices.get("tender")
+            search_index = self.indices.get("search_index")
         except KeyError:
             yield gr.update(value="Index not found. Please upload the files first.", visible=True)
 
-        tools = self.prepare_tools(company, tender)
+        tools = self.prepare_tools(company, tender, search_index)
         agent = self.prepare_agent(tools)
         message = history[-1][0]
         qa_message = f"{message}. Devi rispondere in italiano."
@@ -325,13 +329,14 @@ class RagBot:
         if stream_token and message:
             add_chat_history(f"{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
 
-    def prepare_tools(self, company, tender):
+    def prepare_tools(self, company, tender, search_index):
         tools = []
         if self.chatting_mode_status == SEARCH_ONLY:
             tavily_tool = TavilyToolSpec(api_key=TAVILY_API_KEY)
             tavily_tool_list = tavily_tool.to_tool_list()
+            tools.extend(self.get_query_engine_tools(search_index, 'search_index'))
             tools.extend(tavily_tool_list)
-        else:
+        elif self.chatting_mode_status == ONLY_DOCUMENT or self.chatting_mode_status == DOCUMENTS_AND_SEARCH:
             if company and tender:
                 tools.extend(self.get_query_engine_tools(company, 'company'))
                 tools.extend(self.get_query_engine_tools(tender, 'tender'))
