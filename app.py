@@ -283,10 +283,10 @@ class RagBot:
 
     async def bot(self, history, messages_history):
         if self.current_session_id == '':
-            return gr.update(value="You have to create a new session", visible=True)
+            yield gr.update(value="You have to create a new session", visible=True)
 
         if not openai.api_key:
-            return gr.update(value="Invalid OpenAI API key.", visible=True)
+            yield gr.update(value="Invalid OpenAI API key.", visible=True)
 
         loaded_history = get_chat_history(self.current_session_id)
         history_message = [ChatMessage(role="user", content=history_data[0]) for history_data in loaded_history[-5:]]
@@ -295,7 +295,7 @@ class RagBot:
             company = self.indices.get("company")
             tender = self.indices.get("tender")
         except KeyError:
-            return gr.update(value="Index not found. Please upload the files first.", visible=True)
+            yield gr.update(value="Index not found. Please upload the files first.", visible=True)
 
         tools = self.prepare_tools(company, tender)
         agent = self.prepare_agent(tools)
@@ -340,7 +340,7 @@ class RagBot:
             self.response_sources = "No sources found."
         for token in response.response_gen:
             stream_token += token
-        return stream_token
+        yield stream_token
 
     async def handle_chat_with_colbert(self, qa_message, message):
         ragatouille_pack = RAGatouilleRetrieverPack(
@@ -353,7 +353,7 @@ class RagBot:
         stream_token = ""
         for token in str(response):
             stream_token += token
-        return stream_token
+        yield stream_token
 
     def get_query_engine_tools(self, index, index_key):
         query_engine = index.as_query_engine(similarity_top_k=10)
