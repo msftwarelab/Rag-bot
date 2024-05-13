@@ -310,11 +310,10 @@ class RagBot:
         try:
             company = self.indices.get("company")
             tender = self.indices.get("tender")
-            search_index = self.indices.get("search_index")
         except KeyError:
             yield gr.update(value="Index not found. Please upload the files first.", visible=True)
 
-        tools = self.prepare_tools(company, tender, search_index)
+        tools = self.prepare_tools(company, tender)
         agent = self.prepare_agent(tools)
         message = history[-1][0]
         qa_message = f"{message}. Devi rispondere in italiano."
@@ -329,7 +328,7 @@ class RagBot:
         if stream_token and message:
             add_chat_history(f"{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
 
-    def prepare_tools(self, company, tender, search_index):
+    def prepare_tools(self, company, tender):
         tools = []
         if self.chatting_mode_status == SEARCH_ONLY:
             tavily_tool = TavilyToolSpec(api_key=TAVILY_API_KEY)
