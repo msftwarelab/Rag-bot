@@ -303,12 +303,11 @@ class RagBot:
         qa_message = f"{message}. Devi rispondere in italiano."
 
         if self.colbert == 'No':
-            response = await self.handle_chat_without_colbert(agent, qa_message, message)
+            async for stream_token in self.handle_chat_without_colbert(agent, qa_message, message):
+                yield history, messages_history
         else:
-            response = await self.handle_chat_with_colbert(qa_message, message)
-
-        for stream_token in response:
-            yield history, messages_history
+            async for stream_token in self.handle_chat_with_colbert(qa_message, message):
+                yield history, messages_history
 
         if stream_token and message:
             add_chat_history(f"{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
