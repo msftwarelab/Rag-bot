@@ -20,6 +20,7 @@ from llama_index.core.schema import Document
 from llama_index.core.storage.storage_context import StorageContext
 from langchain_community.chat_models import ChatOpenAI
 from llama_index.llms.openai import OpenAI
+from llama_index.core.agent import ReActAgent
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from llama_index.core.llms.llm import ChatMessage
 from llama_index.agent.openai import OpenAIAgent
@@ -28,7 +29,19 @@ from llama_hub.tools.tavily_research import TavilyToolSpec
 
 from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
 # from llama_index.core.llama_pack import download_llama_pack
-from src.config import DATABASE_PATH, WORDLIFT_THEME, GOOGLE_API_KEY, GOOGLE_ENGINE_ID, TAVILY_API_KEY, OPENAI_API_KEY, TEMPLATE
+from src.config import (
+    DATABASE_PATH, 
+    WORDLIFT_THEME, 
+    GOOGLE_API_KEY, 
+    GOOGLE_ENGINE_ID, 
+    TAVILY_API_KEY, 
+    OPENAI_API_KEY, 
+    TEMPLATE,
+    ONLY_DOCUMENT,
+    LLM_ONLY,
+    DOCUMENTS_AND_SEARCH,
+    SEARCH_ONLY
+)
 from src.database import create_tables, add_chat_history, get_chat_history, delete_chat_history
 from src.utilities import pdf_view_url, get_available_storage, check_or_create_directory
 
@@ -314,21 +327,29 @@ class RagBot:
 
     def prepare_tools(self, company, tender):
         tools = []
-        if company and tender:
-            tools.extend(self.get_query_engine_tools(company, 'company'))
-            tools.extend(self.get_query_engine_tools(tender, 'tender'))
-        elif company:
-            tools.extend(self.get_query_engine_tools(company, 'company'))
-        elif tender:
-            tools.extend(self.get_query_engine_tools(tender, 'tender'))
-        if self.chatting_mode_status == "Documents and Search":
-            tavily_tool = TavilyToolSpec(api_key=TAVILY_API_KEY).to_tool_list()
-            tools.extend(tavily_tool)
+        if self.chatting_mode_status == SEARCH_ONLY:
+            tavily_tool = TavilyToolSpec(api_key=TAVILY_API_KEY)
+            tavily_tool_list = tavily_tool.to_tool_list()
+            tools.extend(tavily_tool_list)
+        else:
+            if company and tender:
+                tools.extend(self.get_query_engine_tools(company, 'company'))
+                tools.extend(self.get_query_engine_tools(tender, 'tender'))
+            elif company:
+                tools.extend(self.get_query_engine_tools(company, 'company'))
+            elif tender:
+                tools.extend(self.get_query_engine_tools(tender, 'tender'))
         return tools
 
     def prepare_agent(self, tools):
+        print("==============> self.chatting_mode_status: ", self.chatting_mode_status)
+        print("==============> self.model: ", self.model)
         custom_prompt = self.custom_prompt if hasattr(self, 'custom_prompt') else None
-        return OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
+        if self.chatting_mode_status == ONLY_DOCUMENT:
+            llm = OpenAI(model=self.model)
+            return ReActAgent.from_tools(tools, verbose=True, llm=llm)
+        else:
+            return OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
 
     async def handle_chat_without_colbert(self, agent, qa_message, message):
         response = agent.stream_chat(qa_message)
@@ -344,7 +365,7 @@ class RagBot:
     async def handle_chat_with_colbert(self, qa_message, message):
         ragatouille_pack = RAGatouilleRetrieverPack(
             self.documents,
-            llm=OpenAI(model='gpt-4-1106-preview'),
+            llm=OpenAI(model=self.model),
             index_name="my_index",
             top_k=5
         )
@@ -711,7 +732,7 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
                 )
                 openai_api_key_textbox.change(ragBot.set_openai_api_key, inputs=openai_api_key_textbox)
                 chatting_mode_radio = gr.Radio(
-                    value="Documents and Search", choices=["Only Document", "No Documents", "Documents and Search"], label="Chatting Quality > Agent Type"
+                    value=DOCUMENTS_AND_SEARCH, choices=[ONLY_DOCUMENT, LLM_ONLY, DOCUMENTS_AND_SEARCH, SEARCH_ONLY], label="Chatting Quality > Agent Type"
                 )
                 custom_prompt = gr.Textbox(
                     placeholder="Here goes the custom prompt",

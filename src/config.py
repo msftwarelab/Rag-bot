@@ -10,6 +10,13 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_ENGINE_ID = os.getenv("GOOGLE_ENGINE_ID")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), '../chat_history.db')
+
+ONLY_DOCUMENT = "Only Document"
+LLM_ONLY = "LLM Only"
+DOCUMENTS_AND_SEARCH = "Documents and Search"
+SEARCH_ONLY = "Search Only"
+
 WORDLIFT_THEME = gr.themes.Soft(
     primary_hue=gr.themes.Color(
         c50="#007AFF",
@@ -79,4 +86,3 @@ Devi sempre rispondere in italiano e fornire risposte dettagliate e ben argoment
 
 Riassumi i punti chiave e le scoperte principali, includendo eventuali collegamenti diretti alle fonti online quando possibile.
 '''
-DATABASE_PATH = os.path.join(os.path.dirname(__file__), '../chat_history.db')
