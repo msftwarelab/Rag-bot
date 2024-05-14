@@ -274,6 +274,14 @@ class RagBot:
                     self.google_source_urls.append(['question'] + file_content)
 
     def insert_google_search_results(self, google_spec):
+        company_index = self.indices.get("company")
+    
+        # Check if the company index is empty and initialize if necessary
+        if company_index.is_empty():  # Assuming there's an is_empty method or similar mechanism
+            initial_node = Document(text="Initial document content")
+            company_index.insert_nodes([initial_node])
+            print("Initialized the company index with an initial document.")
+        
         for search_url in self.google_source_urls[0][1:]:
             if search_url == 'No data':
                 break
@@ -283,7 +291,7 @@ class RagBot:
                 result_dict = json.loads(result.text)
                 snippet = result_dict['items'][0]['snippet']
                 node = Document(text=snippet)
-                self.indices.get("company").insert_nodes([node])
+                company_index.insert_nodes([node])
             print("The Google search result has been successfully inserted.")
 
     def clear_chat_history(self):
@@ -333,6 +341,9 @@ class RagBot:
         if self.chatting_mode_status == SEARCH_ONLY:
             tavily_tool = TavilyToolSpec(api_key=TAVILY_API_KEY)
             tavily_tool_list = tavily_tool.to_tool_list()
+            if company:
+                tools.extend(self.get_query_engine_tools(company, 'company'))
+            tools.extend(self.get_query_engine_tools(company, 'company'))
             tools.extend(tavily_tool_list)
         elif self.chatting_mode_status == ONLY_DOCUMENT or self.chatting_mode_status == DOCUMENTS_AND_SEARCH:
             if company and tender:
@@ -345,8 +356,6 @@ class RagBot:
         return tools
 
     def prepare_agent(self, tools):
-        print("==============> self.chatting_mode_status: ", self.chatting_mode_status)
-        print("==============> self.model: ", self.model)
         custom_prompt = self.custom_prompt if hasattr(self, 'custom_prompt') else None
         if self.chatting_mode_status == ONLY_DOCUMENT:
             llm = OpenAI(model=self.model)
