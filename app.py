@@ -63,7 +63,7 @@ class RagBot:
         self.company_description = "Questo è uno strumento che assiste nella creazione di contenuti relativi all'azienda. Può essere utilizzato per rispondere a domande relative all'azienda."
         self.response_sources = ""
         self.model = gr.State('')
-        self.model = "gpt-4-turbo-preview"
+        self.model = "gpt-4o"
         self.colbert = gr.State('')
         self.colbert = "No"
         self.service_context = gr.State('')
@@ -102,8 +102,8 @@ class RagBot:
         self.chatting_mode_status = value
 
     def set_model(self, _model):
-        if _model == 'gpt-4-turbo-preview':
-            _model = 'gpt-4-0125-preview'
+        if _model == 'gpt-4o':
+            _model = 'gpt-4o'
         self.model = _model
 
     def set_colbert(self, _colbert):
@@ -770,7 +770,7 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
 
                 company_description_textbox.change(lambda x: ragBot.set_description("company_description", x), inputs=company_description_textbox)
                 radio = gr.Radio(
-                    value="gpt-4-turbo-preview", choices=["gpt-3.5-turbo", "gpt-4-turbo-preview"], label="Models"
+                    value="gpt-4o", choices=["gpt-3.5-turbo", "gpt-4o"], label="Models"
                 )
                 radio.change(ragBot.set_model, inputs=radio)
                 radioColBERT = gr.Radio(
