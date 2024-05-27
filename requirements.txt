@@ -1,15 +1,9 @@
-openai == 1.16.2
-llama-index == 0.10.35
-gradio == 4.29.0
-llama-hub == 0.0.79.post1
-langchain == 0.1.14
-pypdf
-docx2txt
-PyMuPDF 
-python-dotenv
-nltk
-transformers
-ragatouille == 0.0.8.post2
-tavily-python == 0.3.3
-bs4
-srsly
+gradio==4.31.5
+gradio_pdf==0.0.7
+llama_index==0.10.39
+openai==1.30.3
+psutil==5.9.5
+python-dotenv==1.0.1
+ragatouille==0.0.8.post2
+Requests==2.32.2
+tavily_python==0.3.3

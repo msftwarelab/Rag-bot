@@ -2,6 +2,7 @@ import webbrowser
 from dotenv import load_dotenv
 from datetime import datetime
 import gradio as gr
+from gradio_pdf import PDF
 import os
 import json
 import openai
@@ -14,12 +15,13 @@ from llama_index.core import (
     SimpleDirectoryReader,
     load_index_from_storage,
 )
-from llama_index.legacy.llm_predictor.base import LLMPredictor
-from llama_index.legacy.service_context import ServiceContext
+from typing import List, Union, Generator
+# from llama_index.legacy.llm_predictor.base import LLM
+# from llama_index.legacy.service_context import ServiceContext
 from llama_index.core.schema import Document
 from llama_index.core.storage.storage_context import StorageContext
-from langchain_community.chat_models import ChatOpenAI
-from llama_index.llms.openai import OpenAI
+# from langchain_openai import ChatOpenAI
+from openai import OpenAI
 from llama_index.core.agent import ReActAgent
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from llama_index.core.llms.llm import ChatMessage
@@ -320,7 +322,6 @@ class RagBot:
             tender = self.indices.get("tender")
         except KeyError:
             yield gr.update(value="Index not found. Please upload the files first.", visible=True)
-
         tools = self.prepare_tools(company, tender)
         agent = self.prepare_agent(tools)
         message = history[-1][0]
@@ -336,7 +337,7 @@ class RagBot:
         if stream_token and message:
             add_chat_history(f"{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
 
-    def prepare_tools(self, company, tender):
+    def prepare_tools(self, company: VectorStoreIndex, tender: VectorStoreIndex) -> List[QueryEngineTool]:
         tools = []
         if self.chatting_mode_status == SEARCH_ONLY:
             tavily_tool = TavilyToolSpec(api_key=TAVILY_API_KEY)
@@ -355,7 +356,7 @@ class RagBot:
                 tools.extend(self.get_query_engine_tools(tender, 'tender'))
         return tools
 
-    def prepare_agent(self, tools):
+    def prepare_agent(self, tools: List[QueryEngineTool]) -> Union[ReActAgent, OpenAIAgent]:
         custom_prompt = self.custom_prompt if hasattr(self, 'custom_prompt') else None
         if self.chatting_mode_status == ONLY_DOCUMENT:
             llm = OpenAI(model=self.model)
@@ -363,7 +364,7 @@ class RagBot:
         else:
             return OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
 
-    async def handle_chat_without_colbert(self, agent, qa_message, message):
+    async def handle_chat_without_colbert(self, agent: OpenAIAgent, qa_message: str, message: str) -> Generator[str, None, None]:
         response = agent.stream_chat(qa_message)
         stream_token = ""
         if response.source_nodes:
@@ -388,7 +389,7 @@ class RagBot:
         yield stream_token
 
     def get_query_engine_tools(self, index, index_key):
-        query_engine = index.as_query_engine(similarity_top_k=10)
+        query_engine = index.as_query_engine(streaming=True, similarity_top_k=10)
         description = self.tender_description if index_key == 'tender' else self.company_description
         return [QueryEngineTool(query_engine=query_engine, metadata=ToolMetadata(name=f'{index_key}_index', description=description))]
 
@@ -555,11 +556,11 @@ class RagBot:
         if api_key:
             openai.api_key = api_key
             os.environ["OPENAI_API_KEY"] = api_key
-            llm_predictor = LLMPredictor(llm=ChatOpenAI(
-                temperature=0, model_name=self.model, streaming=True))
-            global service_context
-            service_context = ServiceContext.from_defaults(
-                llm_predictor=llm_predictor, chunk_size=1024)
+            # llm_predictor = LLM(llm=ChatOpenAI(
+            #     temperature=0, model_name=self.model, streaming=True))
+            # global service_context
+            # service_context = ServiceContext.from_defaults(
+            #     llm_predictor=llm_predictor, chunk_size=1024)
         else:
             gr.Warning("Please enter a valid OpenAI API key or set the env key.")
 
@@ -583,23 +584,22 @@ class RagBot:
     def set_tender_pdf(self, evt: gr.SelectData):
         select_data = evt.index
         if select_data[1] == 0:
-            pdf_viewer_content = f'<iframe src="file/data/tender/{self.current_session_id}/{evt.value}" width="100%" height="600px"></iframe>'
-            file_path = self.search_files_by_name("./data", evt.value)
-            webbrowser.open(file_path)
-            return gr.update(value=pdf_viewer_content)
+            # Construct the correct file path
+            file_path = f"./data/tender/{self.current_session_id}/{evt.value}" 
+            return gr.update(value=file_path) # Directly return the file path
         else:
             self.delete_row("tender", self.file_tender_inform_datas[int(select_data[0])][0])
+            return None
 
     def set_company_pdf(self, evt: gr.SelectData):
         select_data = evt.index
         if select_data[1] == 0:
-            pdf_viewer_content = f'<iframe src="file/data/company/{self.current_session_id}/{evt.value}" width="100%" height="600px"></iframe>'
-            file_path = self.search_files_by_name("./data", evt.value)
-            webbrowser.open(file_path)
-            return gr.update(value=pdf_viewer_content)
+            # Construct the correct file path
+            file_path = f"./data/company/{self.current_session_id}/{evt.value}"
+            return gr.update(value=file_path)  # Directly return the file path
         else:
-            self.delete_row(
-                "company", self.file_company_inform_datas[int(select_data[0])][0])
+            self.delete_row("company", self.file_company_inform_datas[int(select_data[0])][0])
+            return None
 
     def set_source_pdf(self, evt: gr.SelectData):
         pdf_viewer_content = f'<iframe src="file/data/company/{evt.value}" width="100%" height="800px"></iframe>'
@@ -608,11 +608,12 @@ class RagBot:
     def set_highlight_pdf(self, evt: gr.SelectData):
         select_data = evt.index
         file_name = self.source_infor_results[int(select_data[0])][0]
-        source_text = self.source_infor_results[int(select_data[0])][2]
+        # source_text = self.source_infor_results[int(select_data[0])][2]
         file_path = self.search_files_by_name("./data", file_name)
-        webbrowser.open(file_path)
-        pdf_viewer_content = f'<h4>{source_text}</h4>'
-        return gr.update(value=pdf_viewer_content)
+        # webbrowser.open(file_path)
+        # Construct the correct file path
+        return gr.update(value=file_path)  # Directly return the file path
+
 
     def search_files_by_name(self, root_dir, file_name):
         for foldername, subfolders, filenames in os.walk(root_dir):
@@ -722,7 +723,8 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
                         interactive=False,
                         elem_id="source_dataframe"
                     )
-                    pdf_viewer_html = gr.HTML(value=pdf_view_url, label="preview", elem_id="pdf_reference")
+                    # pdf_viewer_html = gr.HTML(value=pdf_view_url, label="preview", elem_id="pdf_reference")
+                    # pdf_viewer = PDF(label="preview", elem_id="pdf_reference")
                     clear = gr.Button("🧹 Start fresh")
             with gr.Accordion("⚙️ Settings", open=False):
                 with gr.Tab("history"):
@@ -881,14 +883,9 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
         lambda: gr.update(value=ragBot.getSessionList()), None, outputs=session_list_dataframe).then(
         lambda: gr.update(value=ragBot.google_source_urls), None, outputs=google_search_dataframe)
 
-    tender_dataframe.select(ragBot.set_tender_pdf, None, pdf_viewer_html).then(
-        ragBot.update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe
-    )
-    company_dataframe.select(ragBot.set_company_pdf, None, pdf_viewer_html).then(
-        ragBot.update_company_info, inputs=[
-            company_dataframe], outputs=company_dataframe
-    )
-    source_dataframe.select(ragBot.set_highlight_pdf, None, pdf_viewer_html)
+    # tender_dataframe.select(ragBot.set_tender_pdf, None, pdf_viewer)
+    # company_dataframe.select(ragBot.set_company_pdf, None, pdf_viewer)
+    # source_dataframe.select(ragBot.set_highlight_pdf, None, pdf_viewer)
 
     session_list_dataframe.select(ragBot.set_session, None, None).then(
         lambda: gr.update(value=get_chat_history(ragBot.current_session_id)), None, outputs=[chatbot]).then(
