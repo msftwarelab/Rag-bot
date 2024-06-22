@@ -7,3 +7,4 @@ python-dotenv==1.0.1
 ragatouille==0.0.8.post2
 Requests==2.32.2
 tavily_python==0.3.3
+docx2txt

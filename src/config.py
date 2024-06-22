@@ -10,7 +10,11 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_ENGINE_ID = os.getenv("GOOGLE_ENGINE_ID")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROUPDOCS_CLIENT_ID = os.getenv("GROUPDOCS_CLIENT_ID")
+GROUPDOCS_CLIENT_SECRET = os.getenv("GROUPDOCS_CLIENT_SECRET")
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), '../chat_history.db')
+HTML_OUTPUT_PATH = "./assets/html"
+PDF_VIEWER_URL = "./assets/pdf_viewer.html"
 
 ONLY_DOCUMENT = "Only Document"
 LLM_ONLY = "LLM Only"
@@ -75,14 +79,13 @@ WORDLIFT_THEME = gr.themes.Soft(
     block_title_background_fill="*primary_100",
     input_background_fill="#F6F6F6",
 )
-TEMPLATE = '''
-Abbiamo fornito le informazioni di contesto di seguito: {context_str}
+TEMPLATE = '''We have provided the context information below: {context_str}
 
-Prendendo in considerazione queste informazioni e utilizzando le risorse online disponibili, ti preghiamo di effettuare una ricerca approfondita sull'argomento. Cerca dati, statistiche, studi, articoli, e qualsiasi altra fonte rilevante che possa arricchire la risposta.
+Taking this information into consideration and using available online resources, please do thorough research on the topic. Look for data, statistics, studies, articles, and any other relevant sources that can enrich the answer.
 
-In qualità di Europlanner consapevole degli obiettivi e delle priorità dell'UE, ti preghiamo di fornire una sintesi delle informazioni trovate, citando le fonti. Assicurati di valutare la credibilità e l'attualità delle informazioni raccolte.
+As a Europlanner aware of the EU's objectives and priorities, please provide a summary of the information found, citing the sources. Be sure to evaluate the credibility and timeliness of the information collected.
 
-Devi sempre rispondere in italiano e fornire risposte dettagliate e ben argomentate alle seguenti domande: {query_str}
+You must always provide detailed and well-argued answers to the following questions: {query_str}
 
-Riassumi i punti chiave e le scoperte principali, includendo eventuali collegamenti diretti alle fonti online quando possibile.
+Summarize key points and key findings, including direct links to online sources when possible.
 '''

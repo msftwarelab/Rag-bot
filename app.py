@@ -1,4 +1,3 @@
-import webbrowser
 from dotenv import load_dotenv
 from datetime import datetime
 import gradio as gr
@@ -21,15 +20,19 @@ from typing import List, Union, Generator
 from llama_index.core.schema import Document
 from llama_index.core.storage.storage_context import StorageContext
 # from langchain_openai import ChatOpenAI
-from openai import OpenAI
+from llama_index.llms.openai import OpenAI
 from llama_index.core.agent import ReActAgent
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
+from llama_index.core.query_engine import SubQuestionQueryEngine
+from llama_index.core.question_gen import LLMQuestionGenerator
 from llama_index.core.llms.llm import ChatMessage
 from llama_index.agent.openai import OpenAIAgent
 from llama_hub.tools.google_search.base import GoogleSearchToolSpec
 from llama_hub.tools.tavily_research import TavilyToolSpec
 
 from llama_hub.llama_packs.ragatouille_retriever.base import RAGatouilleRetrieverPack
+# TODO: Use icecream instead of print()
+from icecream import ic
 # from llama_index.core.llama_pack import download_llama_pack
 from src.config import (
     DATABASE_PATH, 
@@ -42,10 +45,11 @@ from src.config import (
     ONLY_DOCUMENT,
     LLM_ONLY,
     DOCUMENTS_AND_SEARCH,
-    SEARCH_ONLY
+    SEARCH_ONLY,
+    PDF_VIEWER_URL
 )
 from src.database import create_tables, add_chat_history, get_chat_history, delete_chat_history
-from src.utilities import pdf_view_url, get_available_storage, check_or_create_directory
+from src.utilities import get_available_storage, check_or_create_directory, convert_docx_to_html
 
 load_dotenv()
 
@@ -61,8 +65,8 @@ class RagBot:
         self.custom_prompt = PromptTemplate(TEMPLATE)
         self.tender_description = gr.State("")
         self.company_description = gr.State("")
-        self.tender_description = "Questo è uno strumento che assiste nella redazione delle risposte relative al bando di gara ed ai relativi contenuti. Può essere impiegato per ottenere informazioni dettagliate sul bando, sul contesto normativo e sugli obiettivi dell'Unione Europea, dello Stato e della Regione. Utilizzalo per ottimizzare la tua strategia di risposta e per garantire la conformità con le linee guida e i requisiti specificati."
-        self.company_description = "Questo è uno strumento che assiste nella creazione di contenuti relativi all'azienda. Può essere utilizzato per rispondere a domande relative all'azienda."
+        self.tender_description = """This is a tool that assists in drafting responses relating to the tender notice and its contents. It can be used to obtain detailed information on the tender, the regulatory context and the objectives of the European Union, the State and the Region. Use it to optimize your response strategy and ensure compliance with specified guidelines and requirements."""
+        self.company_description = "This is a tool that assists in creating company-related content. It can be used to answer company-related questions."
         self.response_sources = ""
         self.model = gr.State('')
         self.model = "gpt-4o"
@@ -141,7 +145,7 @@ class RagBot:
             files = os.listdir(directory_path)
 
             if files:
-                self.load_or_update_index(f"data/tender/{self.current_session_id}/", 'tender')
+                self.load_or_update_index(f"./data/tender/{self.current_session_id}/", 'tender')
 
             self.file_tender_inform_datas = [[file_name, "Delete"] for file_name in files]
 
@@ -163,7 +167,7 @@ class RagBot:
             files = os.listdir(directory_path)
 
             if files:
-                self.load_or_update_index(f"data/company/{self.current_session_id}/", 'company')
+                self.load_or_update_index(f"./data/company/{self.current_session_id}/", 'company')
 
             self.file_company_inform_datas = [[file_name, "Delete"] for file_name in files]
 
@@ -242,7 +246,7 @@ class RagBot:
 
     def upload_file(self, files, index_key):
         gr.Info("Indexing(uploading...) Please check the Debug output")
-        directory_path = f"data/{index_key}/{self.current_session_id}"
+        directory_path = f"./data/{index_key}/{self.current_session_id}"
         check_or_create_directory(directory_path)
 
         for file in files:
@@ -262,7 +266,7 @@ class RagBot:
             self.load_or_update_index(directory_path, index_key)
             gr.Info("Documents are indexed")
 
-        return "Files uploaded successfully!!!"
+        return "Files uploaded successfully!"
 
     def process_url_files(self, directory_path):
         file_list = os.listdir(directory_path)
@@ -278,8 +282,7 @@ class RagBot:
     def insert_google_search_results(self, google_spec):
         company_index = self.indices.get("company")
     
-        # Check if the company index is empty and initialize if necessary
-        if company_index.is_empty():  # Assuming there's an is_empty method or similar mechanism
+        if company_index.is_empty():
             initial_node = Document(text="Initial document content")
             company_index.insert_nodes([initial_node])
             print("Initialized the company index with an initial document.")
@@ -307,7 +310,7 @@ class RagBot:
         return gr.update(value=get_chat_history(self.current_session_id))
 
 
-    async def bot(self, history, messages_history):
+    def bot(self, history, messages_history):
         if self.current_session_id == '':
             yield gr.update(value="You have to create a new session", visible=True)
 
@@ -315,7 +318,7 @@ class RagBot:
             yield gr.update(value="Invalid OpenAI API key.", visible=True)
 
         loaded_history = get_chat_history(self.current_session_id)
-        history_message = [ChatMessage(role="user", content=history_data[0]) for history_data in loaded_history[-5:]]
+        messages_history = [ChatMessage(role="user", content=history_data[0]) for history_data in loaded_history[-5:]]
 
         try:
             company = self.indices.get("company")
@@ -325,14 +328,24 @@ class RagBot:
         tools = self.prepare_tools(company, tender)
         agent = self.prepare_agent(tools)
         message = history[-1][0]
-        qa_message = f"{message}. Devi rispondere in italiano."
+        qa_message = f"{message}"
+        stream_token = ""
+        history[-1][1] = ""
 
         if self.colbert == 'No':
-            async for stream_token in self.handle_chat_without_colbert(agent, qa_message, message):
+            response = agent.stream_chat(qa_message)
+            if response.source_nodes:
+                self.response_sources = response.source_nodes
+            else:
+                self.response_sources = "No sources found."
+            for token in response.response_gen:
+                history[-1][1] += token
+                stream_token += token
                 yield history, messages_history
         else:
-            async for stream_token in self.handle_chat_with_colbert(qa_message, message):
-                yield history, messages_history
+            # TODO: Implement the stream response here
+            stream_token = "".join(self.handle_chat_with_colbert(qa_message, message))
+            yield history, messages_history
 
         if stream_token and message:
             add_chat_history(f"{message}::::{stream_token}", self.get_source_info(), self.current_session_id)
@@ -357,25 +370,34 @@ class RagBot:
         return tools
 
     def prepare_agent(self, tools: List[QueryEngineTool]) -> Union[ReActAgent, OpenAIAgent]:
+        llm = OpenAI(model=self.model)
         custom_prompt = self.custom_prompt if hasattr(self, 'custom_prompt') else None
-        if self.chatting_mode_status == ONLY_DOCUMENT:
-            llm = OpenAI(model=self.model)
-            return ReActAgent.from_tools(tools, verbose=True, llm=llm)
-        else:
-            return OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
+        # ic(custom_prompt)
+        # question_generator = LLMQuestionGenerator(llm=llm, prompt=custom_prompt)
+        # ic(question_generator)
+        # sub_query_engine = SubQuestionQueryEngine.from_defaults(
+        #     query_engine_tools=tools,
+        #     use_async=True,
+        # )
+        # tools.append(sub_query_engine)
+        
+        # if self.chatting_mode_status == ONLY_DOCUMENT:
+        llm = OpenAI(model=self.model)
+        return ReActAgent.from_tools(tools, verbose=True, llm=llm)
+        # else:
+        #     return OpenAIAgent.from_tools(tools, verbose=True, prompt=custom_prompt)
 
-    async def handle_chat_without_colbert(self, agent: OpenAIAgent, qa_message: str, message: str) -> Generator[str, None, None]:
-        response = agent.stream_chat(qa_message)
-        stream_token = ""
-        if response.source_nodes:
-            self.response_sources = response.source_nodes
-        else:
-            self.response_sources = "No sources found."
-        for token in response.response_gen:
-            stream_token += token
-        yield stream_token
+    # TODO: Delete this part
+    # def handle_chat_without_colbert(self, agent: OpenAIAgent, qa_message: str, message: str) -> Generator[str, None, None]:
+    #     response = agent.stream_chat(qa_message)
+    #     if response.source_nodes:
+    #         self.response_sources = response.source_nodes
+    #     else:
+    #         self.response_sources = "No sources found."
+    #     for token in response.response_gen:
+    #         yield token
 
-    async def handle_chat_with_colbert(self, qa_message, message):
+    def handle_chat_with_colbert(self, qa_message, message):
         ragatouille_pack = RAGatouilleRetrieverPack(
             self.documents,
             llm=OpenAI(model=self.model),
@@ -386,9 +408,9 @@ class RagBot:
         stream_token = ""
         for token in str(response):
             stream_token += token
-        yield stream_token
+            yield stream_token
 
-    def get_query_engine_tools(self, index, index_key):
+    def get_query_engine_tools(self, index: VectorStoreIndex, index_key: str) -> List[QueryEngineTool]:
         query_engine = index.as_query_engine(streaming=True, similarity_top_k=10)
         description = self.tender_description if index_key == 'tender' else self.company_description
         return [QueryEngineTool(query_engine=query_engine, metadata=ToolMetadata(name=f'{index_key}_index', description=description))]
@@ -412,7 +434,7 @@ class RagBot:
             return source_info
         
     def update_url_info(self):
-        directory_path = f"data/url/{self.current_session_id}"
+        directory_path = f"./data/url/{self.current_session_id}"
         if not os.path.exists(directory_path):
             os.makedirs(directory_path)
         self.google_source_urls = [['No data', 'No data', 'No data', 'No data', 'No data',
@@ -448,20 +470,27 @@ class RagBot:
                 rows = cursor.fetchall()
 
                 if rows:
+                    # print("============> rows: ", rows)
                     source_informs = [
                         list(row[2].split("&&&&")) + [row[1].split("::::")[0]]
                         for row in rows if row[2] != "no_data"
                     ]
+                    # print("============> source_informs: ", source_informs)
 
                     for source_inform in source_informs:
                         for temp in source_inform[:-1]:
+                            # print("============> temp: ", temp)
                             temp_1 = list(temp.split("::::")) + [source_inform[-1]]
+                            # print("============> temp_1: ", temp_1)
                             self.source_infor_results.append(temp_1)
+                    #         print("============> self.source_infor_results: ", self.source_infor_results)
+                    # print("============> again self.source_infor_results: ", self.source_infor_results)
 
                     final_result = [
                         [result[-1], result[0], result[1]]
                         for result in self.source_infor_results
                     ]
+                    # print("============> final_result: ", final_result)
 
             if not final_result:
                 final_result = [['No Data', 'No Data', 'No Data']]
@@ -480,9 +509,11 @@ class RagBot:
         else:
             for node_with_score in self.response_sources:
                 node = node_with_score.node
+                # page_number = int(node.source_node.metadata["page_label"])
                 text = node.text
                 extra_info = node.extra_info or {}
                 file_name = extra_info.get("file_name")
+                # TODO: Fetching page_label is not working. Should find out the solution
                 page_label = extra_info.get("page_label")
                 source_info += f"{file_name}::::{page_label}::::{text}&&&&"
             return source_info
@@ -491,9 +522,9 @@ class RagBot:
     def delete_index(self, index_key):
         if openai.api_key:
             gr.Info("Deleting index..")
-            directory_path = f"./storage/{index_key}/{self.current_session_id}"
-            backup_path = f"./backup_path/{index_key}/{self.current_session_id}"
-            documents_path = f"data/{index_key}/{self.current_session_id}"
+            directory_path = f"./storage/{index_key}"
+            backup_path = f"./backup_path/{index_key}"
+            documents_path = f"./data/{index_key}"
             if not os.path.exists(directory_path):
                 os.makedirs(directory_path)
             if not os.path.exists(documents_path):
@@ -503,6 +534,8 @@ class RagBot:
             for filename in os.listdir(documents_path):
                 source_file = os.path.join(documents_path, filename)
                 destination_file = os.path.join(backup_path, filename)
+                if os.path.exists(destination_file):
+                    os.remove(destination_file)
                 shutil.move(source_file, destination_file)
             shutil.rmtree(directory_path)
             shutil.rmtree(documents_path)
@@ -525,7 +558,7 @@ class RagBot:
             backup_path = f"./backup_path/{index_key}/{self.current_session_id}/{current_datetime}"
             index_path = f"./storage/{self.current_session_id}/{index_key}"
             documents_path = f"./data/{index_key}/{self.current_session_id}/{file_name}"
-            directory_path = f"data/{index_key}/{self.current_session_id}"
+            directory_path = f"./data/{index_key}/{self.current_session_id}"
             if not os.path.exists(documents_path):
                 os.makedirs(documents_path)
             if not os.path.exists(backup_path):
@@ -556,11 +589,6 @@ class RagBot:
         if api_key:
             openai.api_key = api_key
             os.environ["OPENAI_API_KEY"] = api_key
-            # llm_predictor = LLM(llm=ChatOpenAI(
-            #     temperature=0, model_name=self.model, streaming=True))
-            # global service_context
-            # service_context = ServiceContext.from_defaults(
-            #     llm_predictor=llm_predictor, chunk_size=1024)
         else:
             gr.Warning("Please enter a valid OpenAI API key or set the env key.")
 
@@ -574,46 +602,48 @@ class RagBot:
         return response
 
     def update_company_info(self, upload_file):
-        file_value = self.get_company_files_inform(directory_path=f"data/company/{self.current_session_id}")
+        file_value = self.get_company_files_inform(directory_path=f"./data/company/{self.current_session_id}")
         return gr.update(value=file_value)
 
     def update_tender_info(self, upload_file):
-        file_value = self.get_tender_files_inform(directory_path=f"data/tender/{self.current_session_id}")
+        file_value = self.get_tender_files_inform(directory_path=f"./data/tender/{self.current_session_id}")
         return gr.update(value=file_value)
 
-    def set_tender_pdf(self, evt: gr.SelectData):
+    def get_html_content_for_file(self, file_path: str) -> str:
+        _, file_extension = os.path.splitext(file_path)
+        file_extension = file_extension.lower()
+
+        if file_extension == '.pdf':
+            return f"""<embed src="file={file_path}" width="100%" height="600px" />"""
+        elif file_extension == '.docx':
+            converted_html_path = convert_docx_to_html(file_path)
+            return f"""<iframe src="file={converted_html_path}" width="100%" height="600px"></iframe>"""
+        else:
+            return "<p>Unsupported file type.</p>"
+
+    def handle_file_selection(self, evt: gr.SelectData, file_type: str):
         select_data = evt.index
         if select_data[1] == 0:
-            # Construct the correct file path
-            file_path = f"./data/tender/{self.current_session_id}/{evt.value}" 
-            return gr.update(value=file_path) # Directly return the file path
+            file_path = f"./data/{file_type}/{self.current_session_id}/{evt.value}"
+            html_content = self.get_html_content_for_file(file_path)
+            return gr.update(value=html_content)
         else:
-            self.delete_row("tender", self.file_tender_inform_datas[int(select_data[0])][0])
+            data_attr = f"file_{file_type}_inform_datas"
+            self.delete_row(file_type, getattr(self, data_attr)[int(select_data[0])][0])
             return None
+
+    def set_tender_pdf(self, evt: gr.SelectData):
+        return self.handle_file_selection(evt, "tender")
 
     def set_company_pdf(self, evt: gr.SelectData):
-        select_data = evt.index
-        if select_data[1] == 0:
-            # Construct the correct file path
-            file_path = f"./data/company/{self.current_session_id}/{evt.value}"
-            return gr.update(value=file_path)  # Directly return the file path
-        else:
-            self.delete_row("company", self.file_company_inform_datas[int(select_data[0])][0])
-            return None
-
-    def set_source_pdf(self, evt: gr.SelectData):
-        pdf_viewer_content = f'<iframe src="file/data/company/{evt.value}" width="100%" height="800px"></iframe>'
-        return gr.update(value=pdf_viewer_content)
+        return self.handle_file_selection(evt, "company")
 
     def set_highlight_pdf(self, evt: gr.SelectData):
         select_data = evt.index
         file_name = self.source_infor_results[int(select_data[0])][0]
-        # source_text = self.source_infor_results[int(select_data[0])][2]
         file_path = self.search_files_by_name("./data", file_name)
-        # webbrowser.open(file_path)
-        # Construct the correct file path
-        return gr.update(value=file_path)  # Directly return the file path
-
+        html_content = self.get_html_content_for_file(file_path)
+        return gr.update(value=html_content)
 
     def search_files_by_name(self, root_dir, file_name):
         for foldername, subfolders, filenames in os.walk(root_dir):
@@ -677,9 +707,9 @@ with open(
 ) as f:
     customCSS = f.read()
 
-title = f"""<h2 align="center">BLM Mostro <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACiklEQVR4AWIYSoAP0Hw5wMoRhVE4i8zOvtq2bSNOjbC2jaC27Tasbdt2g9q27duT5Ezy93a9M807ybd392LO9fwLmoIF4AJ4BX6Bb+AROAAmgOput9trp3F2MA98AkpgGb8BSuMO6O5yucyYXTmK/uALUBytIo+0UfZkvs4NUD16d5crJT73AMWRD8ZoUiPdxLwNQKqsqFuRpidEx/tG7E2jC2z8DOQVZQlIjoH+2myZNK9r5Xk8HjeSWUCRcRGYuw0kh0SjLzBNHqCD+YGuikDXJKAE3UFITQBKoymIWj6fz83NqAQ/uFwBVZLr9QIUBW3BNrAMxKLS3IQTaDqFnbiA5Ql4TLewQmttfY1onblUXp/PdIvfJpJb9Gis18/PghvsnVNqTZ9TesFQFrzjZrJdmAEDyQqgSF5ZfkLufFDfTnOepH36iZA33hd5y4E1aJTSxj60BefAN+GzyCrMyoxzMMV358SN2J5+R+TxU1yf/6Hi9LuSaDqQnRlnMEUZnXTmndL2ryWAqb4J74FVNm/C1uCE5rNEVjilHcOGwDZxMAeAEvSUdUaJi6iqgydgHVCkoCwvzMxrfI87fRVfME3zH59dLGweIDSLWvo7RXsZtQ7UpryIggqyIxvAkjhex1e4vCVFrHHJFWJQs+wKSEzTHygg+QUqh9soZ2TorYdk3NF5A8+gJgYhgv4grDKCK2I5cmodPKQ/iBfMB1DTyvN6vW4k04T5LL8/IeINnp7Rr+KDB3Lk64KE5aVF3fKgstWejDAMI2JzGSGPAT8i+GPSnfl6vQeclbhUECwTHbH4xGv7mTQlzzhrSeM115elM5fhhhZcfGDAMQ/UZfjlrNwQlBQXjhnPc/4Aqf7wDR6odCYAAAAASUVORK5CYII=" alt="client" style="display: inline;"></h2>"""
+gr.set_static_paths(paths=["assets/", "data/"])
 
-clear = gr.Button("🧹 Start fresh")
+title = f"""<h2 align="center">BLM Mostro <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACiklEQVR4AWIYSoAP0Hw5wMoRhVE4i8zOvtq2bSNOjbC2jaC27Tasbdt2g9q27duT5Ezy93a9M807ybd392LO9fwLmoIF4AJ4BX6Bb+AROAAmgOput9trp3F2MA98AkpgGb8BSuMO6O5yucyYXTmK/uALUBytIo+0UfZkvs4NUD16d5crJT73AMWRD8ZoUiPdxLwNQKqsqFuRpidEx/tG7E2jC2z8DOQVZQlIjoH+2myZNK9r5Xk8HjeSWUCRcRGYuw0kh0SjLzBNHqCD+YGuikDXJKAE3UFITQBKoymIWj6fz83NqAQ/uFwBVZLr9QIUBW3BNrAMxKLS3IQTaDqFnbiA5Ql4TLewQmttfY1onblUXp/PdIvfJpJb9Gis18/PghvsnVNqTZ9TesFQFrzjZrJdmAEDyQqgSF5ZfkLufFDfTnOepH36iZA33hd5y4E1aJTSxj60BefAN+GzyCrMyoxzMMV358SN2J5+R+TxU1yf/6Hi9LuSaDqQnRlnMEUZnXTmndL2ryWAqb4J74FVNm/C1uCE5rNEVjilHcOGwDZxMAeAEvSUdUaJi6iqgydgHVCkoCwvzMxrfI87fRVfME3zH59dLGweIDSLWvo7RXsZtQ7UpryIggqyIxvAkjhex1e4vCVFrHHJFWJQs+wKSEzTHygg+QUqh9soZ2TorYdk3NF5A8+gJgYhgv4grDKCK2I5cmodPKQ/iBfMB1DTyvN6vW4k04T5LL8/IeINnp7Rr+KDB3Lk64KE5aVF3fKgstWejDAMI2JzGSGPAT8i+GPSnfl6vQeclbhUECwTHbH4xGv7mTQlzzhrSeM115elM5fhhhZcfGDAMQ/UZfjlrNwQlBQXjhnPc/4Aqf7wDR6odCYAAAAASUVORK5CYII=" alt="client" style="display: inline;"></h2>"""
 
 with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
     gr.Info("Please enter a valid OpenAI API key or set the env key.")
@@ -723,8 +753,8 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
                         interactive=False,
                         elem_id="source_dataframe"
                     )
-                    # pdf_viewer_html = gr.HTML(value=pdf_view_url, label="preview", elem_id="pdf_reference")
-                    # pdf_viewer = PDF(label="preview", elem_id="pdf_reference")
+                    
+                    pdf_viewer_html = gr.HTML(value=f"""<iframe src="file={PDF_VIEWER_URL}" width="100%" height="500px"></iframe>""", label="HTML preview", show_label=True)
                     clear = gr.Button("🧹 Start fresh")
             with gr.Accordion("⚙️ Settings", open=False):
                 with gr.Tab("history"):
@@ -780,8 +810,8 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
                 )
                 radioColBERT.change(ragBot.set_colbert, inputs=radioColBERT) 
                 with gr.Row():
-                    tender_data = ragBot.get_tender_files_inform(directory_path=f"data/tender/{ragBot.current_session_id}")
-                    company_data = ragBot.get_company_files_inform(directory_path=f"data/company/{ragBot.current_session_id}")
+                    tender_data = ragBot.get_tender_files_inform(directory_path=f"./data/tender/{ragBot.current_session_id}")
+                    company_data = ragBot.get_company_files_inform(directory_path=f"./data/company/{ragBot.current_session_id}")
 
                     tender_dataframe = gr.Dataframe(
                         value=tender_data,
@@ -841,8 +871,7 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
         ragBot.bot, [chatbot, session_state], [chatbot, session_state]).then(
         lambda: gr.update(value=get_chat_history(ragBot.current_session_id)), None, outputs=[chatbot]).then(
         lambda: gr.update(value=ragBot.update_source()), None, outputs=source_dataframe).then(
-            ragBot.update_source_info, None, outputs=sources
-    ).then(
+        ragBot.update_source_info, None, outputs=sources).then(
         lambda: gr.update(value=ragBot.google_source_urls), None, outputs=google_search_dataframe)
 
     file_response1 = upload_button1.upload(
@@ -881,11 +910,13 @@ with gr.Blocks(css=customCSS, theme=WORDLIFT_THEME) as demo:
         ragBot.clear_chat_history, None, outputs=[chatbot]).then(
         lambda: gr.update(value=ragBot.update_source()), None, outputs=source_dataframe).then(
         lambda: gr.update(value=ragBot.getSessionList()), None, outputs=session_list_dataframe).then(
-        lambda: gr.update(value=ragBot.google_source_urls), None, outputs=google_search_dataframe)
+        lambda: gr.update(value=ragBot.google_source_urls), None, outputs=google_search_dataframe).then(
+            ragBot.update_tender_info, inputs=[tender_dataframe], outputs=tender_dataframe).then(
+            ragBot.update_company_info, inputs=[company_dataframe], outputs=company_dataframe)
 
-    # tender_dataframe.select(ragBot.set_tender_pdf, None, pdf_viewer)
-    # company_dataframe.select(ragBot.set_company_pdf, None, pdf_viewer)
-    # source_dataframe.select(ragBot.set_highlight_pdf, None, pdf_viewer)
+    tender_dataframe.select(ragBot.set_tender_pdf, None, pdf_viewer_html)
+    company_dataframe.select(ragBot.set_company_pdf, None, pdf_viewer_html)
+    source_dataframe.select(ragBot.set_highlight_pdf, None, pdf_viewer_html)
 
     session_list_dataframe.select(ragBot.set_session, None, None).then(
         lambda: gr.update(value=get_chat_history(ragBot.current_session_id)), None, outputs=[chatbot]).then(
